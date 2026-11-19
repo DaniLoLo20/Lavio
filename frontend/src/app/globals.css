@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Paleta Lavio: azul agua (#1d7df0) + azul marino (#0b1f4d) del logo */
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 224 55% 10%;
+    --card: 0 0% 100%;
+    --border: 214 25% 89%;
+    --ring: 213 87% 53%;
+    --primary: 213 87% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 213 30% 94%;
+    --secondary-foreground: 224 55% 10%;
+    --muted: 213 30% 95%;
+    --muted-foreground: 220 12% 42%;
+    --destructive: 0 72% 51%;
+  }
+  .dark {
+    --background: 224 40% 6%;
+    --foreground: 210 30% 96%;
+    --card: 224 35% 9%;
+    --border: 224 25% 17%;
+    --ring: 205 95% 60%;
+    --primary: 207 92% 58%;
+    --primary-foreground: 224 55% 8%;
+    --secondary: 224 25% 14%;
+    --secondary-foreground: 210 30% 96%;
+    --muted: 224 25% 13%;
+    --muted-foreground: 220 12% 66%;
+    --destructive: 0 62% 55%;
+  }
+  * { @apply border-border; }
+  html { -webkit-tap-highlight-color: transparent; }
+  body { @apply bg-background text-foreground antialiased; font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+}
+
+@layer utilities {
+  .brand-gradient { background: linear-gradient(135deg, #0b1f4d 0%, #0a4bb8 55%, #2aa5ff 100%); }
+  .brand-text { background: linear-gradient(90deg, #0b1f4d, #1d7df0); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .dark .brand-text { background: linear-gradient(90deg, #e6f2ff, #38b6ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+}
+
+/* Impresión del ticket: solo se imprime el ticket (se clona en #ticket-print) */
+#ticket-print { display: none; }
+@media print {
+  body.printing-ticket > *:not(#ticket-print) { display: none !important; }
+  body.printing-ticket #ticket-print { display: block !important; width: 80mm; max-width: 80mm; margin: 0 auto; border: 0 !important; }
+  @page { margin: 4mm; }
+}

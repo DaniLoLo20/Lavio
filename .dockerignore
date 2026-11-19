@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.next
+**/.git
+**/.env
+**/*.log
+**/Dockerfile
+**/.dockerignore
+storage
+docs
+*.bat
