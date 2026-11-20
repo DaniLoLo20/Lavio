@@ -5,6 +5,9 @@ const bcrypt = require('bcryptjs');
 const prisma = new PrismaClient();
 
 async function main() {
+  // Solo existen RECIBIDO y FINALIZADO: se migran los estatus antiguos (idempotente)
+  await prisma.washOrder.updateMany({ where: { status: { in: ['EN_ESPERA', 'EN_PROCESO', 'SECADO'] } }, data: { status: 'RECIBIDO' } });
+  await prisma.washOrder.updateMany({ where: { status: 'ENTREGADO' }, data: { status: 'FINALIZADO' } });
   const admin = await prisma.role.upsert({
     where: { name: 'ADMIN' },
     update: {},

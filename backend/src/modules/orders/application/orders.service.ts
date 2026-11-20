@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { AuthUser, hasPerm } from '../../../common/guards';
 import { WashOrderRepository } from '../domain/order.repository';
-import { OrderStatusValue, WASHER_FORBIDDEN, canTransition, computeTotals, normalizePlate, timesForTransition } from '../domain/order-rules';
+import { OrderStatusValue, canTransition, computeTotals, normalizePlate, normalizeStatus, timesForTransition } from '../domain/order-rules';
 import { CreateOrderDto, PaymentDto } from '../presentation/dto';
 
 const DAY = 86_400_000;
@@ -38,7 +38,10 @@ export class OrdersService {
     }
     const lines = dto.items.map((i) => {
       const s = services.find((x) => x.id === i.serviceId)!;
-      return { serviceId: s.id, name: s.name, unitPrice: s.price, quantity: i.quantity, total: Math.round(s.price * i.quantity * 100) / 100 };
+      const custom = i.unitPrice !== undefined && Math.abs(i.unitPrice - s.price) > 0.001;
+      if (custom && !hasPerm(user, 'orders:edit_price')) throw new ForbiddenException('No tienes permiso para modificar precios');
+      const unitPrice = custom ? i.unitPrice! : s.price;
+      return { serviceId: s.id, name: s.name, unitPrice, quantity: i.quantity, total: Math.round(unitPrice * i.quantity * 100) / 100 };
     });
     const totals = computeTotals(lines, dto.discount ?? 0, settings.taxRate);
     const c = dto.client;
@@ -59,7 +62,7 @@ export class OrdersService {
     });
   }
 
-  list(user: AuthUser, q: { status?: string; active?: string; search?: string; from?: string; to?: string; limit?: string }) {
+  list(user: AuthUser, q: { status?: string; active?: string; archived?: string; search?: string; from?: string; to?: string; limit?: string }) {
     const own = hasPerm(user, 'orders:own_only');          // solo las asignadas
     const prices = hasPerm(user, 'orders:prices');          // puede ver montos
     const limit = Math.min(Math.max(Number(q.limit) || 100, 1), 200);
@@ -72,12 +75,13 @@ export class OrdersService {
         from: q.from ? new Date(q.from) : undefined,
         to: q.to ? new Date(q.to) : undefined,
         assignedToId: own ? user.sub : undefined,
+        archived: q.archived === 'true',
         limit,
       })
       .then((rows) =>
         prices
           ? rows
-          : rows.map(({ subtotal, discount, taxRate, taxAmount, total, client, ...rest }) => rest),
+          : rows.map(({ subtotal, discount, taxRate, taxAmount, total, payments, client, ...rest }) => rest),
       );
   }
 
@@ -101,11 +105,12 @@ export class OrdersService {
    * `at` es el momento real en que el empleado hizo el cambio (aunque estuviera sin conexion) y se usa
    * para hora de inicio/fin y tiempo total.
    */
-  async changeStatus(user: AuthUser, id: string, to: OrderStatusValue, note?: string, atRaw?: string) {
+  async changeStatus(user: AuthUser, id: string, toRaw: OrderStatusValue, note?: string, atRaw?: string) {
     const o = await this.load(user, id);
-    if (WASHER_FORBIDDEN.includes(to) && !hasPerm(user, 'orders:deliver')) throw new ForbiddenException('No tienes permiso para marcar como entregado');
+    const to = normalizeStatus(toRaw);
+    if (normalizeStatus(o.status) === 'FINALIZADO' && to === 'RECIBIDO' && !hasPerm(user, 'orders:deliver')) throw new ForbiddenException('No tienes permiso para reabrir una orden finalizada');
     const view = (x: any) => (hasPerm(user, 'orders:prices') ? x : toWasherView(x));
-    if (o.status === to) return view(o);
+    if (normalizeStatus(o.status) === to) return view(o);
 
     const at = clampTime(atRaw);
     const last: Date = o.statusHistory.length ? o.statusHistory[o.statusHistory.length - 1].createdAt : o.receivedAt;
@@ -169,6 +174,37 @@ export class OrdersService {
     const due = Math.round((Number(o.total) - paid) * 100) / 100;
     if (amount > due + 0.005) throw new BadRequestException(`El monto excede el saldo pendiente ($${due.toFixed(2)})`);
     await this.repo.addPayment(user.tenantId, id, user.sub, { method: dto.method, amount, reference: dto.reference });
+    return this.get(user, id);
+  }
+
+  /** Archiva (o desarchiva) ordenes. Solo se archivan las finalizadas y pagadas: las pendientes de cobro siguen visibles. */
+  async archive(user: AuthUser, ids: string[], archived: boolean) {
+    const unique = [...new Set(ids)];
+    if (archived) {
+      const bad: string[] = [];
+      for (const id of unique) {
+        const o = await this.load(user, id);
+        const paid = o.payments.reduce((s: number, p: any) => s + Number(p.amount), 0);
+        if (normalizeStatus(o.status) !== 'FINALIZADO' || Number(o.total) - paid > 0.005) bad.push(o.folio ?? o.code);
+      }
+      if (bad.length) throw new BadRequestException(`Solo se archivan órdenes finalizadas y pagadas. No cumplen: ${bad.slice(0, 5).join(', ')}${bad.length > 5 ? '…' : ''}`);
+    } else {
+      for (const id of unique) await this.load(user, id);
+    }
+    const count = await this.repo.setArchived(user.tenantId, unique, archived, user.sub);
+    return { count };
+  }
+
+  /** Cambia el precio de un renglon mientras la orden siga pendiente de cobro (el catalogo no se toca). */
+  async changeItemPrice(user: AuthUser, id: string, itemId: string, unitPrice: number) {
+    const o = await this.load(user, id);
+    const item = o.items.find((x: any) => x.id === itemId);
+    if (!item) throw new NotFoundException('Renglón no encontrado');
+    const paid = o.payments.reduce((s: number, p: any) => s + Number(p.amount), 0);
+    const lines = o.items.map((x: any) => ({ unitPrice: x.id === itemId ? unitPrice : Number(x.unitPrice), quantity: x.quantity }));
+    const totals = computeTotals(lines, Number(o.discount), Number(o.taxRate));
+    if (totals.total + 0.005 < paid) throw new BadRequestException('El nuevo total sería menor a lo ya cobrado');
+    await this.repo.updateItemPrice(user.tenantId, id, itemId, user.sub, unitPrice, totals);
     return this.get(user, id);
   }
 

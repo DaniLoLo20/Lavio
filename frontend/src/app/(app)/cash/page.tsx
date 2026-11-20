@@ -171,7 +171,7 @@ export default function CashPage() {
   const receivables = useQuery({ queryKey: ['cash', 'receivables'], queryFn: () => api<any[]>('/cash/receivables'), refetchInterval: online ? 30_000 : false });
   const locals = useLocalOrders(user?.tenant.id) ?? [];
 
-  const [tab, setTab] = useState<Tab>('summary');
+  const [tab, setTab] = useState<Tab>(can('orders:create') ? 'sale' : 'summary');
   const [modal, setModal] = useState<null | 'INCOME' | 'EXPENSE' | 'CLOSE'>(null);
   const [collect, setCollect] = useState<any>(null);
   const [opening, setOpening] = useState('');
@@ -221,6 +221,18 @@ export default function CashPage() {
             <Badge className="mr-2 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">Abierta</Badge>
             por <b>{d.session.openedByName}</b> desde {dateTime(d.session.openedAt)}{d.session.openingNotes && ` · ${d.session.openingNotes}`}
           </p>
+          <div className="mb-1 flex gap-1 border-b">
+            {([['sale', 'Nueva venta', ShoppingCart], ['summary', 'Resumen', Receipt], ['receivables', `Por cobrar${receivables.data?.length ? ` (${receivables.data.length})` : ''}`, Receipt]] as const).filter(([k]) => k !== 'sale' || can('orders:create')).map(([k, label, Icon]) => (
+              <button key={k} onClick={() => setTab(k)} className={cn('-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium', tab === k ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground')}>
+                <Icon className="h-4 w-4" />{label}
+              </button>
+            ))}
+          </div>
+
+          {tab === 'sale' ? (
+            <p className="mt-2 text-xs text-muted-foreground">Efectivo esperado en caja: <b>{money(f.expectedCash, cur)}</b> · {f.orders.count} ventas cobradas · Ingresos {money(f.totalIncome, cur)} · Egresos {money(f.totalExpense, cur)}</p>
+          ) : (
+          <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Card><CardContent><p className="text-xs text-muted-foreground">Caja inicial</p><p className="mt-1 text-2xl font-semibold">{money(f.openingAmount, cur)}</p></CardContent></Card>
             <Card><CardContent><p className="text-xs text-muted-foreground">Ingresos</p><p className="mt-1 text-2xl font-semibold text-emerald-600">{money(f.totalIncome, cur)}</p><p className="text-xs text-muted-foreground">{f.orders.count} {f.orders.count === 1 ? 'venta cobrada' : 'ventas cobradas'}</p></CardContent></Card>
@@ -239,13 +251,8 @@ export default function CashPage() {
             {can('cash:close') && <Button variant="outline" disabled={!online} onClick={() => setModal('CLOSE')}><Lock className="h-4 w-4" />Hacer corte</Button>}
           </div>
 
-          <div className="mt-5 flex gap-1 border-b">
-            {([['summary', 'Resumen', Receipt], ['sale', 'Nueva venta', ShoppingCart], ['receivables', `Por cobrar${receivables.data?.length ? ` (${receivables.data.length})` : ''}`, Receipt]] as const).filter(([k]) => k !== 'sale' || can('orders:create')).map(([k, label, Icon]) => (
-              <button key={k} onClick={() => setTab(k)} className={cn('-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium', tab === k ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground')}>
-                <Icon className="h-4 w-4" />{label}
-              </button>
-            ))}
-          </div>
+          </>
+          )}
 
           {tab === 'summary' && (
             <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -302,6 +309,7 @@ export default function CashPage() {
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="text-right"><p className="font-semibold text-amber-600">{money(o.due, cur)}</p><p className="text-xs text-muted-foreground">de {money(o.total, cur)}</p></div>
+                        {can('orders:edit_price') && <Link href={`/orders/detail?id=${o.id}`} className="text-xs text-primary underline">Editar precio</Link>}
                         {can('orders:collect') && <Button size="sm" variant="success" disabled={!online} onClick={() => setCollect(o)}>Cobrar</Button>}
                       </div>
                     </div>

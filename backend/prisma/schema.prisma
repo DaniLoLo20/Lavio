@@ -215,6 +215,8 @@ model WashOrder {
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
   deletedAt    DateTime?   @map("deleted_at")
+  // Archivada: sale del trabajo diario pero se conserva en reportes e historial
+  archivedAt   DateTime?   @map("archived_at")
   createdById  String?     @map("created_by") @db.Uuid
   updatedById  String?     @map("updated_by") @db.Uuid
 

@@ -26,6 +26,8 @@ export interface OrderFilter {
   from?: Date;
   to?: Date;
   assignedToId?: string;
+  /** true = solo archivadas; false/ausente = solo no archivadas */
+  archived?: boolean;
   limit: number;
 }
 
@@ -43,6 +45,8 @@ export abstract class WashOrderRepository {
   abstract findPhoto(photoId: string): Promise<{ id: string; tenantId: string; orderId: string } | null>;
   abstract addPhoto(tenantId: string, orderId: string, userId: string, type: string, path: string, opts?: { id?: string; takenAt?: Date }): Promise<any>;
   abstract addPayment(tenantId: string, orderId: string, userId: string, p: { method: string; amount: number; reference?: string }): Promise<any>;
+  abstract updateItemPrice(tenantId: string, orderId: string, itemId: string, userId: string, unitPrice: number, totals: { subtotal: number; discount: number; taxRate: number; taxAmount: number; total: number }): Promise<void>;
+  abstract setArchived(tenantId: string, ids: string[], archived: boolean, userId: string): Promise<number>;
   abstract washerBelongsToTenant(tenantId: string, userId: string): Promise<boolean>;
   abstract tenantSettings(tenantId: string): Promise<{ taxRate: number; countryCode: string; name: string }>;
   abstract activeServices(tenantId: string, ids: string[]): Promise<{ id: string; name: string; price: number }[]>;

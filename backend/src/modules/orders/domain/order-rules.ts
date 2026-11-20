@@ -3,16 +3,22 @@
 export const ORDER_STATUSES = ['RECIBIDO', 'EN_ESPERA', 'EN_PROCESO', 'SECADO', 'FINALIZADO', 'ENTREGADO'] as const;
 export type OrderStatusValue = (typeof ORDER_STATUSES)[number];
 
+/**
+ * Solo hay dos estatus de trabajo: RECIBIDO y FINALIZADO. Los demas valores del enum se conservan en la base
+ * solo por compatibilidad y se migran al arrancar (EN_ESPERA/EN_PROCESO/SECADO -> RECIBIDO, ENTREGADO -> FINALIZADO).
+ */
 const TRANSITIONS: Record<OrderStatusValue, OrderStatusValue[]> = {
-  RECIBIDO: ['EN_ESPERA', 'EN_PROCESO'],
-  EN_ESPERA: ['EN_PROCESO'],
-  EN_PROCESO: ['SECADO', 'EN_ESPERA'],
-  SECADO: ['FINALIZADO', 'EN_PROCESO'],
-  FINALIZADO: ['ENTREGADO'],
-  ENTREGADO: [],
+  RECIBIDO: ['FINALIZADO'],
+  FINALIZADO: ['RECIBIDO'], // reabrir (requiere orders:deliver)
+  EN_ESPERA: ['FINALIZADO', 'RECIBIDO'],
+  EN_PROCESO: ['FINALIZADO', 'RECIBIDO'],
+  SECADO: ['FINALIZADO', 'RECIBIDO'],
+  ENTREGADO: ['RECIBIDO'],
 };
 
-export const WASHER_FORBIDDEN: OrderStatusValue[] = ['ENTREGADO'];
+/** Estatus antiguos que aun pueden llegar de operaciones en cola de dispositivos sin actualizar. */
+const LEGACY: Record<string, OrderStatusValue> = { EN_ESPERA: 'RECIBIDO', EN_PROCESO: 'RECIBIDO', SECADO: 'RECIBIDO', ENTREGADO: 'FINALIZADO' };
+export const normalizeStatus = (s: OrderStatusValue): OrderStatusValue => LEGACY[s] ?? s;
 
 export function canTransition(from: OrderStatusValue, to: OrderStatusValue): boolean {
   return TRANSITIONS[from].includes(to);
@@ -31,12 +37,11 @@ export function timesForTransition(
   current: { receivedAt: Date; startedAt: Date | null },
   now = new Date(),
 ): StatusTimes {
-  if (to === 'EN_PROCESO' && !current.startedAt) return { startedAt: now };
+  if (to === 'RECIBIDO') return { finishedAt: null, totalSeconds: null };
   if (to === 'FINALIZADO') {
     const start = current.startedAt ?? current.receivedAt;
     return { finishedAt: now, totalSeconds: Math.max(0, Math.round((now.getTime() - start.getTime()) / 1000)) };
   }
-  if (to === 'ENTREGADO') return { deliveredAt: now };
   return {};
 }
 

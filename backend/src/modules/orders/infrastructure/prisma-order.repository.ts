@@ -124,7 +124,9 @@ export class PrismaOrderRepository extends WashOrderRepository {
         tenantId: f.tenantId,
         deletedAt: null,
         ...(f.status ? { status: f.status as any } : {}),
-        ...(f.active ? { status: { not: 'ENTREGADO' } } : {}),
+        // activas = por finalizar + finalizadas en las ultimas 36 h (las mas viejas se ven en el historial)
+        ...(f.active ? { AND: [{ OR: [{ status: { in: ['RECIBIDO', 'EN_ESPERA', 'EN_PROCESO', 'SECADO'] as any } }, { status: { in: ['FINALIZADO', 'ENTREGADO'] as any }, finishedAt: { gte: new Date(Date.now() - 36 * 3600_000) } }] }] } : {}),
+        archivedAt: f.archived ? { not: null } : null,
         ...(f.assignedToId ? { assignedToId: f.assignedToId } : {}),
         ...(f.from || f.to ? { receivedAt: { ...(f.from ? { gte: f.from } : {}), ...(f.to ? { lt: f.to } : {}) } } : {}),
         ...(search
@@ -143,6 +145,7 @@ export class PrismaOrderRepository extends WashOrderRepository {
         client: { select: { id: true, name: true } },
         assignedTo: { select: { id: true, fullName: true } },
         items: { select: { name: true, quantity: true } },
+        payments: { where: { deletedAt: null }, select: { amount: true, method: true } },
       },
       orderBy: { receivedAt: 'desc' },
       take: f.limit,
@@ -182,6 +185,20 @@ export class PrismaOrderRepository extends WashOrderRepository {
     return this.prisma.payment.create({
       data: { tenantId, orderId, method: p.method as any, amount: p.amount, reference: p.reference, createdById: userId },
     });
+  }
+
+  async updateItemPrice(tenantId: string, orderId: string, itemId: string, userId: string, unitPrice: number, totals: { subtotal: number; discount: number; taxRate: number; taxAmount: number; total: number }) {
+    await this.prisma.$transaction(async (tx) => {
+      const it = await tx.washOrderItem.findFirst({ where: { id: itemId, orderId, tenantId } });
+      if (!it) throw new Error('item');
+      await tx.washOrderItem.update({ where: { id: itemId }, data: { unitPrice, total: Math.round(unitPrice * it.quantity * 100) / 100 } });
+      await tx.washOrder.update({ where: { id: orderId }, data: { ...totals, updatedById: userId } });
+    });
+  }
+
+  async setArchived(tenantId: string, ids: string[], archived: boolean, userId: string) {
+    const r = await this.prisma.washOrder.updateMany({ where: { tenantId, id: { in: ids }, deletedAt: null }, data: { archivedAt: archived ? new Date() : null, updatedById: userId } });
+    return r.count;
   }
 
   async washerBelongsToTenant(tenantId: string, userId: string) {

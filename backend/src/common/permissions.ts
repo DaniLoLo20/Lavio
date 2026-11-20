@@ -14,7 +14,9 @@ export const CATALOG: PermResource[] = [
     resource: 'orders', label: 'Órdenes y punto de venta',
     actions: [
       A('view', 'Ver órdenes'), A('create', 'Crear órdenes (Nueva orden)'), A('status', 'Cambiar estatus'), A('photos', 'Tomar fotografías'),
-      A('notify', 'Avisar al cliente'), A('assign', 'Asignar lavador'), A('collect', 'Cobrar (registrar pagos)'), A('deliver', 'Marcar como entregado'),
+      A('notify', 'Avisar al cliente'), A('assign', 'Asignar lavador'), A('collect', 'Cobrar (registrar pagos)'), A('deliver', 'Reabrir una orden finalizada'),
+      A('archive', 'Archivar y desarchivar órdenes'),
+      A('edit_price', 'Modificar el precio de un servicio antes de cobrar', 'El precio del catálogo no cambia; solo el de esta orden'),
       A('prices', 'Ver precios, montos y ticket', 'Sin este permiso no ve dinero ni datos de contacto del cliente'),
       A('own_only', 'Solo ve las órdenes que le asignan', 'Restricción: es el comportamiento del lavador'),
       A('export', 'Exportar (CSV)'),

@@ -13,7 +13,7 @@ import { mergeOrder } from '@/lib/offline/merge';
 import { addPhotoOffline, changeStatusOffline } from '@/lib/offline/sync';
 import { METHODS, NEXT, PHOTO_TYPES, STATUS, dateTime, duration, money, type Status } from '@/lib/utils';
 import { TicketActions, TicketView } from '@/components/ticket';
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ErrorText, Label, PageHeader, Select, StatusBadge, buttonClass } from '@/components/ui';
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ErrorText, Input, Label, PageHeader, Select, StatusBadge, buttonClass } from '@/components/ui';
 
 function LocalPhoto({ id, blob, type }: { id: string; blob: Blob; type: string }) {
   const url = useObjectUrl(id, blob);
@@ -51,6 +51,8 @@ function OrderDetail() {
   const notif = useQuery({ queryKey: ['notif', id], queryFn: () => api<any>(`/orders/${id}/notifications`), enabled: synced && online, retry: false });
 
   const assign = useMutation({ mutationFn: (w: string) => api(`/orders/${id}/assign`, { method: 'PATCH', body: { assignedToId: w || null } }), onSuccess: refresh });
+  const [priceEdit, setPriceEdit] = useState<{ id: string; v: string } | null>(null);
+  const price = useMutation({ mutationFn: (x: { id: string; v: number }) => api(`/orders/${id}/items/${x.id}/price`, { method: 'PATCH', body: { unitPrice: x.v } }), onSuccess: () => { setPriceEdit(null); refresh(); } });
   const pay = useMutation({ mutationFn: (m: string) => api(`/orders/${id}/payments`, { body: { method: m } }), onSuccess: refresh });
 
   const [photoType, setPhotoType] = useState('FRONT');
@@ -88,7 +90,7 @@ function OrderDetail() {
     );
   }
 
-  const next = (NEXT[o.status as Status] ?? []).filter((s) => can('orders:deliver') || s !== 'ENTREGADO');
+  const next = (NEXT[o.status as Status] ?? []).filter((s) => s !== 'RECIBIDO' || o.status === 'RECIBIDO' || can('orders:deliver'));
   const paid = (o.payments ?? []).reduce((s: number, p: any) => s + Number(p.amount), 0);
   const trackUrl = typeof window !== 'undefined' ? `${location.origin}/track/${o.code}` : '';
   const needsOnline = !online || !synced;
@@ -110,7 +112,7 @@ function OrderDetail() {
                 {next.length === 0 && <p className="text-sm text-muted-foreground">Orden entregada.</p>}
                 {next.map((s) => (
                   <Button key={s} size="lg" variant={s === 'FINALIZADO' ? 'success' : 'default'} onClick={() => changeStatus(s)}>
-                    {STATUS[s].label}
+                    {s === 'FINALIZADO' ? 'Marcar como finalizada' : 'Reabrir orden'}
                   </Button>
                 ))}
               </div>
@@ -217,7 +219,24 @@ function OrderDetail() {
               <Card>
                 <CardHeader><CardTitle>Cobro</CardTitle></CardHeader>
                 <CardContent className="space-y-2 text-sm">
-                  {o.items.map((i: any) => <div key={i.id} className="flex justify-between"><span>{i.quantity} × {i.name}</span><span>{money(i.total, cur)}</span></div>)}
+                  {o.items.map((i: any) => (
+                    <div key={i.id} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 flex-1">{i.quantity} × {i.name}</span>
+                      {priceEdit && priceEdit.id === i.id ? (
+                        <span className="flex items-center gap-1">
+                          <Input type="number" min="0" step="0.01" aria-label="Precio unitario" className="h-8 w-24 text-right" autoFocus value={priceEdit.v} onChange={(e) => setPriceEdit({ id: i.id, v: e.target.value })} />
+                          <Button size="sm" disabled={price.isPending || priceEdit.v === ''} onClick={() => price.mutate({ id: i.id, v: Number(priceEdit.v) })}>Guardar</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setPriceEdit(null)}>Cancelar</Button>
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          {can('orders:edit_price') && paid < Number(o.total) + 0.005 && synced && online && !o.pending && <button type="button" className="text-xs text-primary underline" onClick={() => setPriceEdit({ id: i.id, v: String(Number(i.unitPrice)) })}>Editar precio</button>}
+                          <span>{money(i.total, cur)}</span>
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  <ErrorText error={price.error} />
                   <div className="flex justify-between border-t pt-2"><span>Subtotal</span><span>{money(o.subtotal, cur)}</span></div>
                   <div className="flex justify-between"><span>Descuento</span><span>-{money(o.discount, cur)}</span></div>
                   <div className="flex justify-between"><span>Impuestos ({Number(o.taxRate)}%)</span><span>{money(o.taxAmount, cur)}</span></div>

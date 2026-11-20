@@ -7,7 +7,7 @@ import { mkdirSync, promises as fsp } from 'fs';
 import { join } from 'path';
 import { AuthUser, CurrentUser, Perms } from '../../../common/guards';
 import { OrdersService } from '../application/orders.service';
-import { AssignDto, ChangeStatusDto, CreateOrderDto, PaymentDto } from './dto';
+import { ArchiveDto, AssignDto, ChangeStatusDto, CreateOrderDto, ItemPriceDto, PaymentDto } from './dto';
 
 const UPLOAD_DIR = () => process.env.UPLOAD_DIR || '/storage/uploads';
 const EXT: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/heic': '.heic' };
@@ -22,6 +22,9 @@ export class OrdersController {
 
   @Perms('orders:create') @Post()
   create(@CurrentUser() u: AuthUser, @Body() dto: CreateOrderDto) { return this.svc.create(u, dto); }
+
+  @Perms('orders:archive') @Post('archive')
+  archive(@CurrentUser() u: AuthUser, @Body() dto: ArchiveDto) { return this.svc.archive(u, dto.ids.slice(0, 200), dto.archived); }
 
   @Perms('orders:view') @Get()
   list(@CurrentUser() u: AuthUser, @Query() q: any) { return this.svc.list(u, q); }
@@ -41,6 +44,11 @@ export class OrdersController {
   @Perms('orders:assign') @Patch(':id/assign')
   assign(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AssignDto) {
     return this.svc.assign(u, id, dto.assignedToId ?? null);
+  }
+
+  @Perms('orders:edit_price') @Patch(':id/items/:itemId/price')
+  itemPrice(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Param('itemId', ParseUUIDPipe) itemId: string, @Body() dto: ItemPriceDto) {
+    return this.svc.changeItemPrice(u, id, itemId, dto.unitPrice);
   }
 
   @Perms('orders:collect') @Post(':id/payments')

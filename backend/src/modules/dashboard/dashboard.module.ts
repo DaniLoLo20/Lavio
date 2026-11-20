@@ -44,7 +44,7 @@ export class DashboardService {
       this.prisma.washOrder.groupBy({ by: ['clientId'], where: { tenantId: t, deletedAt: null, clientId: { not: null }, receivedAt: { gte: monthStart, lt: nextMonth } } }),
       this.prisma.washOrder.findMany({ where: { tenantId: t, deletedAt: null, receivedAt: { gte: fetchFrom, lt: tomorrow } }, select: { receivedAt: true, total: true, totalSeconds: true } }),
       this.prisma.inventoryProduct.findMany({ where: { tenantId: t, deletedAt: null }, select: { id: true, name: true, stock: true, minStock: true } }),
-      this.prisma.washOrder.groupBy({ by: ['status'], where: { tenantId: t, deletedAt: null, status: { not: 'ENTREGADO' } }, _count: true }),
+      this.prisma.washOrder.groupBy({ by: ['status'], where: { tenantId: t, deletedAt: null, status: { in: ['RECIBIDO', 'EN_ESPERA', 'EN_PROCESO', 'SECADO'] } }, _count: true }),
       this.prisma.washOrderItem.groupBy({ by: ['name'], where: { tenantId: t, order: { deletedAt: null, receivedAt: inRange } }, _sum: { quantity: true, total: true }, orderBy: { _sum: { total: 'desc' } }, take: 6 }),
       this.prisma.payment.groupBy({ by: ['method'], where: { tenantId: t, deletedAt: null, paidAt: inRange }, _sum: { amount: true } }),
     ]);

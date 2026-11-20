@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsDateString, IsEmail, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEmail, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { ContactPreference, PaymentMethod } from '@prisma/client';
 
 export class VehicleDto {
@@ -21,6 +21,12 @@ export class ClientInputDto {
 export class ItemDto {
   @IsUUID() serviceId: string;
   @IsInt() @Min(1) @Max(99) quantity: number;
+  /** Precio distinto al del catálogo para esta orden (requiere orders:edit_price) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) unitPrice?: number;
+}
+
+export class ItemPriceDto {
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) unitPrice: number;
 }
 
 export class PaymentDto {
@@ -53,4 +59,9 @@ export class ChangeStatusDto {
 
 export class AssignDto {
   @IsOptional() @IsUUID() assignedToId?: string | null;
+}
+
+export class ArchiveDto {
+  @IsArray() @ArrayMinSize(1) @IsUUID('all', { each: true }) ids: string[];
+  @IsBoolean() archived: boolean;
 }

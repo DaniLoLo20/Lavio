@@ -95,7 +95,7 @@ export class InventoryService {
 @Controller('inventory')
 export class InventoryController {
   constructor(private svc: InventoryService) {}
-  @PermsAny('inventory:view', 'purchases:create') @Get('products') products(@CurrentUser() u: AuthUser, @Query('low') low?: string) { return this.svc.products(u.tenantId, low === 'true'); }
+  @PermsAny('inventory:view', 'purchases:view', 'purchases:create') @Get('products') products(@CurrentUser() u: AuthUser, @Query('low') low?: string) { return this.svc.products(u.tenantId, low === 'true'); }
   @Perms('inventory:create') @Post('products') create(@CurrentUser() u: AuthUser, @Body() dto: ProductDto) { return this.svc.createProduct(u, dto); }
   @Perms('inventory:edit') @Patch('products/:id') update(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProductDto) { return this.svc.updateProduct(u, id, dto); }
   @Perms('inventory:delete') @Delete('products/:id') remove(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) { return this.svc.removeProduct(u, id); }
