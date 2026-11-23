@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArchiveRestore, Banknote, Check, CheckCheck, CloudOff, MessageCircle } from 'lucide-react';
+import { Archive, ArchiveRestore, Banknote, Check, CheckCheck, CloudOff, MessageCircle, Search } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useOnline } from '@/lib/net';
@@ -13,6 +13,8 @@ import { METHODS, STATUS, STATUS_ORDER, cn, dateTime, money } from '@/lib/utils'
 import { Modal } from '@/components/modal';
 import { Button, Card, Empty, ErrorText, Input, PageHeader, Select, StatusBadge } from '@/components/ui';
 import { DownloadButton } from '@/components/download-button';
+import { Glass, GlassPage, Section, Segmented } from '@/components/glass';
+import { TipField, sendTip } from '@/components/tips';
 
 type View = 'all' | 'open' | 'due' | 'paid' | 'archived';
 
@@ -105,109 +107,124 @@ export default function OrdersPage() {
   ];
 
   return (
-    <>
-      <PageHeader title="Órdenes e historial">{<DownloadButton type="orders" params={{ from, to }} />}</PageHeader>
-
-      {canPrices && dueRows.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border-2 border-amber-500/60 bg-amber-500/10 p-4">
-          <div className="flex items-center gap-3">
-            <Banknote className="h-8 w-8 text-amber-600" />
-            <div>
-              <p className="text-xs font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300">Pendiente de cobro</p>
-              <p className="text-2xl font-bold">{money(dueTotal, cur)} <span className="text-sm font-normal text-muted-foreground">en {dueRows.length} {dueRows.length === 1 ? 'orden' : 'órdenes'}</span></p>
-            </div>
+    <GlassPage>
+      <div className="mx-auto max-w-5xl space-y-4">
+        <header className="flex items-end justify-between gap-3 px-1">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Órdenes</h1>
+            <p className="text-sm text-muted-foreground">{rows.length} {rows.length === 1 ? 'orden' : 'órdenes'}{view !== 'all' ? ' en esta vista' : ''}</p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setView('due')}>Ver por cobrar</Button>
-            {canCollect && <Button size="lg" variant="success" disabled={!online || !dueRows.some(synced)} onClick={() => setCollect(dueRows.filter(synced))}>Cobrar todas</Button>}
-          </div>
-        </div>
-      )}
+          <DownloadButton type="orders" params={{ from, to }} />
+        </header>
 
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-        <Input placeholder="Buscar folio, código, placa o cliente" value={search} onChange={(e) => setSearch(e.target.value)} />
-        <Select value={status} onChange={(e) => setStatus(e.target.value)} className="sm:w-48" aria-label="Estado">
-          <option value="">Todos los estados</option>
-          {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}
-        </Select>
-        <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="sm:w-40" aria-label="Desde" />
-        <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="sm:w-40" aria-label="Hasta" />
-      </div>
-      <div className="mb-3 flex flex-wrap items-center gap-2" role="group" aria-label="Filtrar por días">
-        <span className="text-xs font-medium text-muted-foreground">Días:</span>
-        {DAY_CHIPS.map((c) => {
-          const on = from === c.from() && to === c.to();
-          return <button key={c.label} aria-pressed={on} onClick={() => { setFrom(c.from()); setTo(c.to()); }} className={cn('rounded-full border px-3 py-1 text-xs font-medium', on ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted')}>{c.label}</button>;
-        })}
-      </div>
-      <div className="mb-3 flex flex-wrap gap-2" role="tablist" aria-label="Vista">
-        {chips.map((c) => (
-          <button key={c.k} role="tab" aria-selected={view === c.k} onClick={() => setView(c.k)} className={cn('rounded-full border px-4 py-1.5 text-sm font-medium', view === c.k ? 'border-primary bg-primary text-primary-foreground' : c.cls ?? 'hover:bg-muted')}>
-            {c.label}{c.n !== undefined && <span className="ml-1 opacity-70">({c.n})</span>}
-          </button>
-        ))}
-      </div>
-
-      {chosen.length > 0 && (
-        <div className="sticky top-2 z-20 mb-3 flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3 shadow-lg" role="toolbar" aria-label="Acciones masivas">
-          <span className="mr-auto text-sm font-semibold">{chosen.length} seleccionada{chosen.length === 1 ? '' : 's'}</span>
-          {canStatus && <Button variant="outline" disabled={busy || !chosen.some((o) => !isDone(o))} onClick={() => void finalize(chosen)}><CheckCheck className="h-4 w-4" />Marcar finalizadas</Button>}
-          {canStatus && canNotify && <Button disabled={busy || !online || !chosen.some(synced)} onClick={() => void finalizeAndNotify()}><MessageCircle className="h-4 w-4" />Finalizar y avisar</Button>}
-          {canNotify && <Button variant="outline" disabled={!online || !chosen.some((o) => isDone(o) && synced(o))} onClick={() => setNotify(chosen.filter((o) => isDone(o) && synced(o)))}><MessageCircle className="h-4 w-4" />Avisar</Button>}
-          {canArchive && view !== 'archived' && <Button variant="outline" disabled={busy || !online || !chosen.some(archivable)} title="Solo finalizadas y pagadas" onClick={() => void archive(chosen, true)}><Archive className="h-4 w-4" />Archivar</Button>}
-          {canArchive && view === 'archived' && <Button variant="outline" disabled={busy || !online} onClick={() => void archive(chosen, false)}><ArchiveRestore className="h-4 w-4" />Desarchivar</Button>}
-          {canCollect && <Button variant="success" disabled={!online || !chosen.some((o) => balanceOf(o) > 0.005 && synced(o))} onClick={() => setCollect(chosen.filter((o) => balanceOf(o) > 0.005 && synced(o)))}><Banknote className="h-4 w-4" />Cobrar</Button>}
-          <Button variant="ghost" onClick={() => setSel(new Set())}>Quitar selección</Button>
-        </div>
-      )}
-      <ErrorText error={err} />
-
-      <Card className="divide-y">
-        {rows.length > 0 && (
-          <label className="flex items-center gap-3 bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
-            <input type="checkbox" aria-label="Seleccionar todas" checked={allChecked} onChange={toggleAll} className="h-4 w-4" />
-            Seleccionar todas las que se ven ({rows.length})
-          </label>
-        )}
-        {rows.length === 0 && <Empty text={q.isLoading ? 'Cargando…' : 'Sin resultados'} />}
-        {rows.map((o) => {
-          const bal = balanceOf(o);
-          const known = o.total != null;
-          return (
-            <div key={o.id} className={cn('flex items-center gap-3 p-4', sel.has(o.id) && 'bg-primary/5')}>
-              <input type="checkbox" aria-label={`Seleccionar ${o.folio ?? o.vehicle.plate}`} checked={sel.has(o.id)} onChange={() => toggle(o.id)} className="h-5 w-5 shrink-0" />
-              <Link href={`/orders/detail?id=${o.id}`} className="min-w-0 flex-1 hover:underline">
-                <p className="truncate text-sm font-medium">
-                  {o.folio ?? 'Folio por asignar'} · {o.vehicle.brand} {o.vehicle.model} <span className="font-mono text-muted-foreground">{o.vehicle.plate}</span>
-                  {o.pending && <CloudOff className="ml-2 inline h-3.5 w-3.5 text-sky-600" aria-label="Pendiente de sincronizar" />}
-                </p>
-                <p className="truncate text-xs text-muted-foreground">{dateTime(o.receivedAt)} · {o.client?.name ?? 'Sin cliente'} · {o.assignedTo?.fullName ?? 'Sin asignar'}</p>
-              </Link>
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                {known && <span className="hidden text-sm font-medium sm:block">{money(o.total, cur)}</span>}
-                <StatusBadge status={o.status === 'ENTREGADO' ? 'FINALIZADO' : o.status} />
-                {known && (bal > 0.005
-                  ? <span className="rounded-md bg-amber-500 px-2 py-1 text-xs font-bold text-white" data-testid="due">Por cobrar {money(bal, cur)}</span>
-                  : <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300"><Check className="h-3 w-3" />Pagada</span>)}
-                {canCollect && bal > 0.005 && <Button size="sm" variant="success" disabled={!online || !synced(o)} title={!synced(o) ? 'Se puede cobrar cuando la orden se sincronice' : undefined} onClick={() => setCollect([o])}>Cobrar</Button>}
-                {canStatus && !isDone(o) && <Button size="sm" variant="outline" disabled={busy} onClick={() => void finalize([o])}>Finalizar</Button>}
-                {canArchive && view !== 'archived' && archivable(o) && <Button size="sm" variant="ghost" disabled={busy || !online} onClick={() => void archive([o], true)}><Archive className="h-3.5 w-3.5" />Archivar</Button>}
-                {canArchive && view === 'archived' && <Button size="sm" variant="ghost" disabled={busy || !online} onClick={() => void archive([o], false)}><ArchiveRestore className="h-3.5 w-3.5" />Desarchivar</Button>}
+        {canPrices && dueRows.length > 0 && (
+          <Glass className="flex flex-wrap items-center justify-between gap-3 border-amber-300/70 bg-amber-100/60 p-4 dark:bg-amber-500/10">
+            <div className="flex items-center gap-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-amber-500 text-white shadow"><Banknote className="h-6 w-6" /></span>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-800 dark:text-amber-300">Pendiente de cobro</p>
+                <p className="text-2xl font-bold tabular-nums">{money(dueTotal, cur)} <span className="text-sm font-normal text-muted-foreground">en {dueRows.length} {dueRows.length === 1 ? 'orden' : 'órdenes'}</span></p>
               </div>
             </div>
-          );
-        })}
-      </Card>
+            <div className="flex gap-2">
+              <Button variant="outline" className="rounded-full bg-white/60" onClick={() => setView('due')}>Ver por cobrar</Button>
+              {canCollect && <Button size="lg" variant="success" className="rounded-full" disabled={!online || !dueRows.some(synced)} onClick={() => setCollect(dueRows.filter(synced))}>Cobrar todas</Button>}
+            </div>
+          </Glass>
+        )}
+
+        <Glass className="space-y-3 p-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Buscar folio, código, placa o cliente" value={search} onChange={(e) => setSearch(e.target.value)} className="h-11 rounded-2xl bg-white/70 pl-10 dark:bg-white/10" />
+          </div>
+          <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none]" role="group" aria-label="Filtrar por días">
+            {DAY_CHIPS.map((c) => {
+              const on = from === c.from() && to === c.to();
+              return <button key={c.label} aria-pressed={on} onClick={() => { setFrom(c.from()); setTo(c.to()); }} className={cn('shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition active:scale-95', on ? 'bg-primary text-primary-foreground shadow' : 'bg-black/5 text-foreground dark:bg-white/10')}>{c.label}</button>;
+            })}
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <Select value={status} onChange={(e) => setStatus(e.target.value)} className="col-span-2 h-10 rounded-2xl bg-white/70 text-sm sm:col-span-1 dark:bg-white/10" aria-label="Estado">
+              <option value="">Todos los estados</option>
+              {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}
+            </Select>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-10 rounded-2xl bg-white/70 dark:bg-white/10" aria-label="Desde" />
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-10 rounded-2xl bg-white/70 dark:bg-white/10" aria-label="Hasta" />
+          </div>
+        </Glass>
+
+        <Segmented label="Vista" value={view} onChange={setView} items={chips.map((c) => ({ k: c.k, label: c.n !== undefined ? `${c.label} (${c.n})` : c.label }))} />
+
+        {chosen.length > 0 && (
+          <Glass className="sticky top-2 z-20 flex flex-wrap items-center gap-2 p-3 shadow-xl" role="toolbar" aria-label="Acciones masivas">
+            <span className="mr-auto text-sm font-semibold">{chosen.length} seleccionada{chosen.length === 1 ? '' : 's'}</span>
+            {canStatus && <Button variant="outline" className="rounded-full bg-white/60" disabled={busy || !chosen.some((o) => !isDone(o))} onClick={() => void finalize(chosen)}><CheckCheck className="h-4 w-4" />Marcar finalizadas</Button>}
+            {canStatus && canNotify && <Button className="rounded-full" disabled={busy || !online || !chosen.some(synced)} onClick={() => void finalizeAndNotify()}><MessageCircle className="h-4 w-4" />Finalizar y avisar</Button>}
+            {canNotify && <Button variant="outline" className="rounded-full bg-white/60" disabled={!online || !chosen.some((o) => isDone(o) && synced(o))} onClick={() => setNotify(chosen.filter((o) => isDone(o) && synced(o)))}><MessageCircle className="h-4 w-4" />Avisar</Button>}
+            {canArchive && view !== 'archived' && <Button variant="outline" className="rounded-full bg-white/60" disabled={busy || !online || !chosen.some(archivable)} title="Solo finalizadas y pagadas" onClick={() => void archive(chosen, true)}><Archive className="h-4 w-4" />Archivar</Button>}
+            {canArchive && view === 'archived' && <Button variant="outline" className="rounded-full bg-white/60" disabled={busy || !online} onClick={() => void archive(chosen, false)}><ArchiveRestore className="h-4 w-4" />Desarchivar</Button>}
+            {canCollect && <Button variant="success" className="rounded-full" disabled={!online || !chosen.some((o) => balanceOf(o) > 0.005 && synced(o))} onClick={() => setCollect(chosen.filter((o) => balanceOf(o) > 0.005 && synced(o)))}><Banknote className="h-4 w-4" />Cobrar</Button>}
+            <Button variant="ghost" className="rounded-full" onClick={() => setSel(new Set())}>Quitar selección</Button>
+          </Glass>
+        )}
+        <ErrorText error={err} />
+
+        <Section>
+          {rows.length > 0 && (
+            <label className="flex items-center gap-3 bg-black/[0.03] px-4 py-2 text-xs text-muted-foreground dark:bg-white/5">
+              <input type="checkbox" aria-label="Seleccionar todas" checked={allChecked} onChange={toggleAll} className="h-4 w-4" />
+              Seleccionar todas las que se ven ({rows.length})
+            </label>
+          )}
+          {rows.length === 0 && <Empty text={q.isLoading ? 'Cargando…' : 'Sin resultados'} />}
+          {rows.map((o) => {
+            const bal = balanceOf(o);
+            const known = o.total != null;
+            return (
+              <div key={o.id} className={cn('px-4 py-3', sel.has(o.id) && 'bg-primary/5')}>
+                <div className="flex items-start gap-3">
+                  <input type="checkbox" aria-label={`Seleccionar ${o.folio ?? o.vehicle.plate}`} checked={sel.has(o.id)} onChange={() => toggle(o.id)} className="mt-1 h-5 w-5 shrink-0" />
+                  <Link href={`/orders/detail?id=${o.id}`} className="min-w-0 flex-1">
+                    <p className="flex items-center gap-2 truncate text-sm">
+                      <span className="font-mono text-base font-bold">{o.vehicle.plate}</span>
+                      <span className="truncate">{o.vehicle.brand} {o.vehicle.model}</span>
+                      {o.pending && <CloudOff className="h-3.5 w-3.5 shrink-0 text-sky-600" aria-label="Pendiente de sincronizar" />}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">{o.folio ?? 'Folio por asignar'} · {o.client?.name ?? 'Sin cliente'} · {dateTime(o.receivedAt)}</p>
+                    <p className="truncate text-xs text-muted-foreground">{o.assignedTo?.fullName ?? 'Sin asignar'}</p>
+                  </Link>
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    {known && <span className="text-sm font-semibold tabular-nums">{money(o.total, cur)}</span>}
+                    <StatusBadge status={o.status === 'ENTREGADO' ? 'FINALIZADO' : o.status} />
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2 pl-8">
+                  {known && (bal > 0.005
+                    ? <span className="rounded-full bg-amber-500 px-3 py-1 text-xs font-bold text-white" data-testid="due">Por cobrar {money(bal, cur)}</span>
+                    : <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300"><Check className="h-3 w-3" />Pagada</span>)}
+                  {canCollect && bal > 0.005 && <Button size="sm" variant="success" className="rounded-full px-4" disabled={!online || !synced(o)} title={!synced(o) ? 'Se puede cobrar cuando la orden se sincronice' : undefined} onClick={() => setCollect([o])}>Cobrar</Button>}
+                  {canStatus && !isDone(o) && <Button size="sm" variant="outline" className="rounded-full bg-white/60 px-4" disabled={busy} onClick={() => void finalize([o])}>Finalizar</Button>}
+                  {canArchive && view !== 'archived' && archivable(o) && <Button size="sm" variant="ghost" className="rounded-full" disabled={busy || !online} onClick={() => void archive([o], true)}><Archive className="h-3.5 w-3.5" />Archivar</Button>}
+                  {canArchive && view === 'archived' && <Button size="sm" variant="ghost" className="rounded-full" disabled={busy || !online} onClick={() => void archive([o], false)}><ArchiveRestore className="h-3.5 w-3.5" />Desarchivar</Button>}
+                </div>
+              </div>
+            );
+          })}
+        </Section>
+      </div>
 
       {collect && <CollectModal orders={collect} cur={cur} onClose={() => { setCollect(null); refresh(); }} />}
       {notify && <NotifyModal orders={notify} onClose={() => { setNotify(null); refresh(); }} />}
-    </>
+    </GlassPage>
   );
 }
-
 /** Cobro de una o varias órdenes con el mismo método de pago (se registra el saldo completo de cada una). */
 function CollectModal({ orders, cur, onClose }: { orders: any[]; cur?: string; onClose: () => void }) {
+  const { can } = useAuth();
   const [method, setMethod] = useState('CASH');
+  const [tip, setTip] = useState('');
+  const [tipErr, setTipErr] = useState<string | null>(null);
   const [state, setState] = useState<Record<string, 'ok' | string>>({});
   const [running, setRunning] = useState(false);
   const total = orders.reduce((s, o) => s + balanceOf(o), 0);
@@ -217,7 +234,11 @@ function CollectModal({ orders, cur, onClose }: { orders: any[]; cur?: string; o
     setRunning(true);
     for (const o of orders) {
       if (state[o.id] === 'ok') continue;
-      try { await api(`/orders/${o.id}/payments`, { body: { method } }); setState((s) => ({ ...s, [o.id]: 'ok' })); }
+      try {
+        await api(`/orders/${o.id}/payments`, { body: { method } });
+        setState((s) => ({ ...s, [o.id]: 'ok' }));
+        if (orders.length === 1 && Number(tip) > 0) setTipErr(await sendTip({ amount: Number(tip), method, orderId: o.id }));
+      }
       catch (e) { setState((s) => ({ ...s, [o.id]: (e as Error).message })); }
     }
     setRunning(false);
@@ -237,11 +258,13 @@ function CollectModal({ orders, cur, onClose }: { orders: any[]; cur?: string; o
           ))}
         </div>
         <p className="flex items-baseline justify-between text-lg font-semibold"><span>Total a cobrar</span><span>{money(total, cur)}</span></p>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {Object.entries(METHODS).map(([k, l]) => (
             <button key={k} type="button" onClick={() => setMethod(k)} className={cn('rounded-lg border p-3 text-sm font-medium hover:bg-muted', method === k && 'border-primary bg-primary/10 text-primary')}>{l}</button>
           ))}
         </div>
+        {orders.length === 1 && can('cash:tips') && state[orders[0].id] !== 'ok' && <TipField base={total} value={tip} onChange={setTip} cur={cur} />}
+        {tipErr && <p className="rounded-md bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">El pago se cobró, pero la propina no se registró: {tipErr}</p>}
         {Object.values(state).filter((v) => v !== 'ok').map((v, i) => <ErrorText key={i} error={new Error(v)} />)}
         {finished && Object.values(state).every((v) => v === 'ok')
           ? <Button size="lg" className="w-full" onClick={onClose}>Listo</Button>

@@ -7,7 +7,7 @@
  * - /api/* NUNCA se cachea aqui: los datos los guarda React Query (IndexedDB) y los cambios, la cola de sincronizacion.
  * - Background Sync: al volver la red avisa a las ventanas abiertas para vaciar la cola.
  */
-const VERSION = 'v9';
+const VERSION = 'v22';
 const SHELL = `lavio-shell-${VERSION}`;
 const STATIC = 'lavio-static';
 const PHOTOS = 'lavio-photos';

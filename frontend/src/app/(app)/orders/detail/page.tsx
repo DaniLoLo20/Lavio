@@ -13,6 +13,7 @@ import { mergeOrder } from '@/lib/offline/merge';
 import { addPhotoOffline, changeStatusOffline } from '@/lib/offline/sync';
 import { METHODS, NEXT, PHOTO_TYPES, STATUS, dateTime, duration, money, type Status } from '@/lib/utils';
 import { TicketActions, TicketView } from '@/components/ticket';
+import { TipField, sendTip } from '@/components/tips';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ErrorText, Input, Label, PageHeader, Select, StatusBadge, buttonClass } from '@/components/ui';
 
 function LocalPhoto({ id, blob, type }: { id: string; blob: Blob; type: string }) {
@@ -53,7 +54,16 @@ function OrderDetail() {
   const assign = useMutation({ mutationFn: (w: string) => api(`/orders/${id}/assign`, { method: 'PATCH', body: { assignedToId: w || null } }), onSuccess: refresh });
   const [priceEdit, setPriceEdit] = useState<{ id: string; v: string } | null>(null);
   const price = useMutation({ mutationFn: (x: { id: string; v: number }) => api(`/orders/${id}/items/${x.id}/price`, { method: 'PATCH', body: { unitPrice: x.v } }), onSuccess: () => { setPriceEdit(null); refresh(); } });
-  const pay = useMutation({ mutationFn: (m: string) => api(`/orders/${id}/payments`, { body: { method: m } }), onSuccess: refresh });
+  const [tip, setTip] = useState('');
+  const [tipMsg, setTipMsg] = useState<string | null>(null);
+  const pay = useMutation({
+    mutationFn: async (m: string) => {
+      const r = await api(`/orders/${id}/payments`, { body: { method: m } });
+      if (Number(tip) > 0) { setTipMsg(await sendTip({ amount: Number(tip), method: m, orderId: id })); setTip(''); }
+      return r;
+    },
+    onSuccess: () => { refresh(); qc.invalidateQueries({ queryKey: ['cash'] }); },
+  });
 
   const [photoType, setPhotoType] = useState('FRONT');
   const [err, setErr] = useState<unknown>();
@@ -251,9 +261,11 @@ function OrderDetail() {
                         <Button disabled={pay.isPending || needsOnline} onClick={() => pay.mutate(payMethod)}>Cobrar</Button>
                       </div>
                       {needsOnline && <p className="text-xs text-muted-foreground">Cobrar posteriormente requiere conexión y que la orden esté sincronizada.</p>}
+                      {can('cash:tips') && <TipField base={Number(o.total) - paid} value={tip} onChange={setTip} cur={cur} />}
                       <ErrorText error={pay.error} />
                     </div>
                   ) : <p className="text-emerald-600">Pagado</p>}
+                  {tipMsg && <p className="text-xs text-amber-700">La propina no se registró: {tipMsg}</p>}
                 </CardContent>
               </Card>)}
 

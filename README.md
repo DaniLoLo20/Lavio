@@ -185,3 +185,37 @@ Botón flotante **Activar Modo Voz** (en el POS y, para el administrador, en las
 ## Autocompletar clientes
 
 En Nueva orden/Caja, al escribir nombre o teléfono se sugieren clientes existentes; al escribir una placa conocida se rellenan vehículo y cliente. El Modo Voz reconoce por placa, nombre exacto o teléfono, avisa «Cliente registrado» y omite las preguntas que ya conoce. Al elegir un cliente la orden se liga a él (`client.id`); sin elegirlo, el backend ya evitaba duplicados por teléfono. El índice (`GET /clients/lookup`, hasta 2000 clientes) se guarda en caché y funciona sin conexión.
+
+## Flujo rápido, dictado, compras y precios
+
+- **Entrada / proceso / salida** (`/washer`): pestañas por etapa y un botón grande con el siguiente paso (Iniciar lavado, Pasar a secado, Finalizar, Entregar). «Finalizar ya» salta el secado; en Salida, «Cobrar y entregar» cobra el saldo y entrega en un toque (requiere permisos de cobrar/entregar).
+- **Caja directa**: `/cash` abre en *Nueva venta* con los servicios a la vista; el formulario de vehículo, cliente y pago está en la misma pantalla y el botón es **Cobrar**.
+- **Editar precio** (permiso `orders:edit_price`): en la venta se edita el precio de cada renglón y en órdenes pendientes de cobro desde el detalle (`PATCH /orders/:id/items/:itemId/price`). El precio del catálogo no cambia.
+- **Compras + inventario** en `/purchases`: tabla de inventario con botón *Comprar*. La compra suma al inventario, actualiza el costo y, con la caja abierta, descuenta de ella como egreso *Compras*.
+- **Modo Voz**: ajuste *Forma de captura* (Ajustes de voz). *Guiado* ahora pregunta primero el servicio. *Dictado rápido*: una sola grabación con palabras clave (placa, marca, modelo, color, nombre, teléfono, servicio, observaciones, pago) y «siguiente orden» para encadenar varias; cada orden se rellena sola, queda en cola y se guardan todas las completas de una vez. El navegador reconoce la voz en vivo: se guarda el texto entendido, no el audio.
+## Estatus de orden y acciones masivas
+
+- Solo hay dos estatus: **Recibido** y **Finalizado**. Al arrancar, el backend migra las órdenes antiguas (En espera, En proceso y Secado pasan a Recibido; Entregado pasa a Finalizado). Un dispositivo con operaciones antiguas en cola sigue funcionando: el servidor las traduce.
+- Reabrir una orden finalizada requiere el permiso `orders:deliver` (ahora se llama «Reabrir una orden finalizada»).
+- **Órdenes**: banner «Pendiente de cobro», insignia «Por cobrar \» o «Pagada» en cada fila, pestañas (Todas, Por finalizar, Por cobrar, Pagadas) y botón Cobrar por fila.
+- **Selección masiva**: marcar finalizadas, finalizar y avisar, avisar (cola de WhatsApp/correo con el mensaje precargado; tú confirmas cada envío) y cobrar varias órdenes con un mismo método de pago.
+- `/washer`: pestañas Todas / Por finalizar / Finalizadas; botón Finalizar y, ya finalizada, Cobrar y Avisar.
+- **Nueva orden** (`/pos`): ya no hay panel «Orden actual» ni botón «Pagar». Tocar un servicio lo selecciona y abre directo la ventana de pago; dentro se agregan o quitan servicios, se edita el precio y el descuento. La Caja conserva su pantalla directa con resumen.
+
+## Archivar órdenes, filtro por días y voz del asistente
+
+- **Archivar** (permiso `orders:archive`): en Órdenes, botón por fila o en la barra masiva; pestaña *Archivadas* con *Desarchivar*. Solo se archivan órdenes **finalizadas y pagadas** (las pendientes de cobro siguen visibles). Una archivada sale de la lista y del trabajo diario, pero se conserva en reportes, finanzas y dashboard (`POST /orders/archive`, `GET /orders?archived=true`).
+- **Filtro por días**: chips Hoy, Ayer, 7 días, 30 días y Todo, además de las fechas Desde/Hasta. Se calculan en la hora local del dispositivo.
+- **Voz del asistente** (Configuración > Modo Voz): tipo de voz (Automática/Mujer/Hombre), voz específica del dispositivo, velocidad, tono y pausa entre frases. El navegador no informa el género de una voz; se deduce por su nombre y solo aparecen las voces instaladas en el dispositivo.
+- **Nueva orden** (`/pos`) ahora trae «Cobrar después» seleccionado por defecto (la Caja sigue cobrando al momento).
+## Propinas, dictado libre y Nueva orden en celular
+
+- **Propinas** (permiso `cash:tips`; el administrador ya lo tiene): se capturan al cobrar (campo con atajos 10/15/20 % en Nueva orden, en el cobro de una orden y en el detalle) o desde *Caja > Propinas*. Son dinero del personal: **no cuentan como venta ni como gasto** (ni en finanzas), pero sí como efectivo en el cajón hasta entregarlas. La pestaña muestra recibidas, entregadas y por entregar por persona; *Entregar* sale de la caja como «Pago de propinas». Cobrar y registrar propinas necesita conexión y caja abierta.
+- **Dictado libre**: en el asistente de voz (modo *Dictado rápido*) basta una frase natural, p. ej. «Un Versa gris, placas ABC-123, lavado básico para Juan Pérez». Se separan placa, vehículo, servicio, cliente, teléfono y método de pago con reglas propias (sin IA ni servicios externos); «siguiente orden» encadena más. Lo que no se entienda queda marcado para corregir.
+- **Nueva orden en celular**: el botón *Crear orden* queda fijo abajo, campos en dos columnas y métodos de pago compactos. Cada servicio muestra su ilustración de auto y su descripción, tanto en las tarjetas de la pantalla de servicios como en la ventana de pago.
+## Estilo glass, foto trasera y asistente de voz (v2)
+
+- **Estilo glass iOS** en Caja, Órdenes, Dashboard, Nueva orden, sus ventanas de cobro y el Modo Voz: fondo con luces suaves, tarjetas de vidrio esmerilado, controles segmentados y ventanas tipo hoja que suben desde abajo. Las ventanas se dibujan sobre las barras del celular y el botón principal queda en un pie fijo que siempre se ve.
+- **Caja**: tarjeta principal con el efectivo esperado, accesos de Ingreso, Egreso y Corte, y los datos del vehículo en una ventana al tocar *Cobrar*. *Por cobrar* también permite cobrar propina.
+- **Foto trasera** (en la ventana de venta): detecta en el dispositivo la placa, la marca y el modelo (por los emblemas) con OCR (tesseract.js) y el color de la carrocería por los píxeles. Solo rellena lo vacío y guarda la foto en la orden como *Trasera*. Si falta algo, abre un mini asistente que pregunta en voz alta solo lo que falta y abre el micrófono solo. La lectura es una sugerencia: hay que verificarla. El OCR descarga su idioma (~10 MB) con internet la primera vez.
+- **Asistente de dictado**: micrófono abajo (zona del pulgar) con halo que reacciona al volumen; transcripción en vivo con placa/vehículo en azul, servicios en verde y cliente en morado; chips rápidos (servicios y *Consultar caja*); barra de texto en la base; tono de confirmación y tarjeta lista para guardar en un toque. «Consultar caja» también funciona dicho o escrito.

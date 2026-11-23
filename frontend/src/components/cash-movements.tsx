@@ -15,8 +15,8 @@ export function MovementsTable({ rows, cur, onDelete, deleting }: { rows: any[];
   return (
     <div className="divide-y">
       {rows.map((m) => (
-        <div key={m.id} className="flex items-center justify-between gap-3 p-3 text-sm">
-          <div className="flex min-w-0 items-center gap-3">
+        <div key={m.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             {m.type === 'INCOME' ? <ArrowUpCircle className="h-5 w-5 shrink-0 text-emerald-600" /> : <ArrowDownCircle className="h-5 w-5 shrink-0 text-red-600" />}
             <div className="min-w-0">
               <p className="truncate font-medium">{m.concept}</p>

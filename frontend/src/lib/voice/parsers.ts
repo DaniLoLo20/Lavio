@@ -41,7 +41,7 @@ export function spokenDigits(text: string): string {
 
 /* ───────────────────────── placa ───────────────────────── */
 
-const LETTERS: Record<string, string> = {
+export const LETTERS: Record<string, string> = {
   a: 'A', be: 'B', b: 'B', ce: 'C', c: 'C', de: 'D', d: 'D', e: 'E', efe: 'F', f: 'F', ge: 'G', g: 'G', hache: 'H', h: 'H', i: 'I',
   jota: 'J', j: 'J', ka: 'K', k: 'K', ele: 'L', l: 'L', eme: 'M', m: 'M', ene: 'N', n: 'N', o: 'O', pe: 'P', p: 'P', cu: 'Q', q: 'Q',
   erre: 'R', ere: 'R', r: 'R', ese: 'S', s: 'S', te: 'T', t: 'T', u: 'U', uve: 'V', ve: 'V', v: 'V', equis: 'X', x: 'X', ye: 'Y', zeta: 'Z', z: 'Z', w: 'W',

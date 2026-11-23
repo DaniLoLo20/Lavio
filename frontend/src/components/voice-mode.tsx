@@ -11,6 +11,8 @@ import { DraggableFab } from './draggable-fab';
 import { VoiceSettingsForm } from './voice-settings';
 import { ClientSuggest } from './client-suggest';
 import { DictationMode } from './voice-dictation';
+import { GlassBlobs } from './glass';
+import { Portal } from './portal';
 import { findByExactName, findByPhone, findByPlate, searchClients, type ClientLite } from '@/lib/clients';
 
 export interface VoiceDraft {
@@ -400,8 +402,10 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
   );
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-background/95 backdrop-blur print:hidden" role="dialog" aria-label="Modo Voz">
-      <header className="flex items-center justify-between border-b px-4 py-3">
+    <Portal>
+    <div className="fixed inset-0 z-[70] isolate flex flex-col bg-background print:hidden" role="dialog" aria-label="Modo Voz">
+        <GlassBlobs />
+      <header className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2 font-semibold"><span className="grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground"><Mic className="h-4 w-4" /></span>{showSettings ? 'Configuración de voz' : 'Modo Voz'}</div>
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => saveVoiceSettings({ speakPrompts: !settings.speakPrompts })} aria-label={settings.speakPrompts ? 'Silenciar guía de voz' : 'Activar guía de voz'}>{settings.speakPrompts ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}</Button>
@@ -414,7 +418,7 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
         <div className="mx-auto w-full max-w-xl space-y-4 p-4">
           {showSettings ? (
             <>
-              <div className="rounded-xl border bg-card p-4"><VoiceSettingsForm /></div>
+              <div className="rounded-3xl border border-white/60 bg-white/60 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06] p-4"><VoiceSettingsForm /></div>
               <Button className="w-full" onClick={() => { setShowSettings(false); setNonce((n) => n + 1); }}>Volver al Modo Voz</Button>
             </>
           ) : (
@@ -433,7 +437,7 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
 
               {step ? (
                 <>
-                  <div className="rounded-xl border bg-card p-5 text-center shadow-sm">
+                  <div className="rounded-3xl border border-white/60 bg-white/60 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06] p-5 text-center shadow-[0_8px_30px_rgba(30,41,90,0.08)]">
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Paso {idx + 1} de {STEPS.length}{step.optional && ' · opcional'}</p>
                     <h2 className="mt-1 text-xl font-semibold">{step.prompt}</h2>
                     <p className="mt-1 text-sm text-muted-foreground">{step.example}</p>
@@ -469,7 +473,7 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
                             const q = draft.items[s.id] ?? 0;
                             return (
                               <button key={s.id} type="button" onClick={() => { clearAdvance(); setDraft((d) => ({ ...d, items: { ...d.items, [s.id]: q + 1 } })); }}
-                                className={cn('relative rounded-lg border bg-card p-3 text-left text-sm hover:border-primary', q > 0 && 'border-primary ring-1 ring-primary')}>
+                                className={cn('relative rounded-2xl border border-white/60 bg-white/60 p-3 text-left text-sm backdrop-blur-xl hover:border-primary dark:border-white/10 dark:bg-white/[0.06]', q > 0 && 'border-primary ring-1 ring-primary')}>
                                 {q > 0 && <span className="absolute right-2 top-2 grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground">{q}</span>}
                                 <span className="block pr-6 font-medium leading-tight">{s.name}</span>
                                 <span className="text-xs text-muted-foreground">{money(s.price, currency)}</span>
@@ -498,7 +502,7 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
                   <p className="-mt-2 text-sm text-muted-foreground">Se lee en voz alta. Di <b>«guardar»</b>, <b>«corregir»</b> o <b>«cancelar»</b>; o corrige los datos escribiendo o con el micrófono de cada campo.</p>
 
                   {supported && (
-                    <div className="flex items-center gap-3 rounded-xl border bg-card p-3">
+                    <div className="flex items-center gap-3 rounded-3xl border border-white/60 bg-white/60 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06] p-3">
                       <button type="button" aria-label={status === 'listening' ? 'Detener' : 'Hablar'} onClick={() => (status === 'listening' ? listener.stop() : void summaryListen(++runId.current))}
                         className={cn('relative grid h-12 w-12 shrink-0 place-items-center rounded-full text-primary-foreground', status === 'listening' ? 'bg-red-500' : 'bg-primary')}>
                         {status === 'listening' && <span className="absolute inset-0 animate-ping rounded-full bg-red-500/40" />}
@@ -513,7 +517,7 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
                   )}
                   {msg && <p className={cn('rounded-md px-3 py-2 text-sm', msg.tone === 'error' ? 'bg-red-500/10 text-red-700 dark:text-red-300' : 'bg-sky-500/10 text-sky-700 dark:text-sky-300')}>{msg.text}</p>}
 
-                  <div className="space-y-3 rounded-xl border bg-card p-4">
+                  <div className="space-y-3 rounded-3xl border border-white/60 bg-white/60 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06] p-4">
                     <div><Label>Placa *</Label><div className="flex gap-2"><Input aria-label="Placa" value={draft.plate} onChange={(e) => update('plate', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8))} className="font-mono uppercase" /><MicBtn field="plate" /></div></div>
                     {VehicleFields}
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -570,6 +574,7 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 

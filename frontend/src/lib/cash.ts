@@ -14,5 +14,5 @@ export const EXPENSE_CATS = [
   { value: 'OTHER', label: 'Otros' },
 ];
 
-export const CAT_LABEL: Record<string, string> = Object.fromEntries([...INCOME_CATS, ...EXPENSE_CATS].map((c) => [c.value, c.label]));
+export const CAT_LABEL: Record<string, string> = { ...Object.fromEntries([...INCOME_CATS, ...EXPENSE_CATS].map((c) => [c.value, c.label])), TIP: 'Propina', TIP_PAYOUT: 'Pago de propinas' };
 export const SOURCE_LABEL: Record<string, string> = { ORDERS: 'Cobros de órdenes', ...CAT_LABEL };

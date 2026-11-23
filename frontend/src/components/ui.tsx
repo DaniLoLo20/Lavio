@@ -29,7 +29,7 @@ Button.displayName = 'Button';
 export const buttonClass = (variant: ButtonProps['variant'] = 'default', size: ButtonProps['size'] = 'default') =>
   buttonVariants({ variant, size });
 
-const field = 'w-full rounded-md border bg-card px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
+const field = 'w-full rounded-md border bg-card px-3 text-base sm:text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(({ className, ...p }, ref) => (
   <input ref={ref} className={cn(field, 'h-10', className)} {...p} />

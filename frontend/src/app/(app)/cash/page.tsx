@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownCircle, ArrowUpCircle, Camera, CloudOff, FileText, Lock, Receipt, ShoppingCart, Unlock } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, Camera, ChevronRight, CloudOff, HandCoins, Lock, Receipt, ShoppingCart, Unlock, Wallet } from 'lucide-react';
 import { api, compressImage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useOnline } from '@/lib/net';
@@ -13,6 +13,8 @@ import { METHODS, STATUS, cn, dateTime, money, type Status } from '@/lib/utils';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Empty, ErrorText, Input, Label, PageHeader, Select, Textarea } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { MovementsTable } from '@/components/cash-movements';
+import { TipField, TipsPanel, sendTip, useTips } from '@/components/tips';
+import { Action, Glass, GlassPage, Mini, Section, Segmented } from '@/components/glass';
 import { DownloadButton } from '@/components/download-button';
 import { PosRegister } from '@/components/pos-register';
 
@@ -84,39 +86,49 @@ function MovementModal({ type, onClose, onDone }: { type: 'INCOME' | 'EXPENSE'; 
 }
 
 function CollectModal({ order, cur, onClose, onDone }: { order: any; cur?: string; onClose: () => void; onDone: () => void }) {
+  const { can } = useAuth();
   const [method, setMethod] = useState('CASH');
   const [amount, setAmount] = useState(String(order.due));
+  const [tip, setTip] = useState('');
+  const [tipErr, setTipErr] = useState<string | null>(null);
+  const tipN = Number(tip) || 0;
   const pay = useMutation({
-    mutationFn: () => api(`/orders/${order.id}/payments`, { body: { method, amount: Number(amount) } }),
+    mutationFn: async () => {
+      await api(`/orders/${order.id}/payments`, { body: { method, amount: Number(amount) } });
+      // La propina se registra aparte (no es venta): si falla, el cobro ya quedó hecho y se avisa
+      if (tipN > 0) { const e = await sendTip({ amount: tipN, method, orderId: order.id }); if (e) { setTipErr(e); throw new Error('TIP'); } }
+    },
     onSuccess: onDone,
   });
   const partial = Number(amount) > 0 && Number(amount) < order.due;
   return (
     <Modal title={`Cobrar ${order.folio}`} onClose={onClose}>
-      <form className="space-y-4 p-4" onSubmit={(e) => { e.preventDefault(); pay.mutate(); }}>
-        <div className="rounded-lg bg-muted p-3 text-sm">
+      <form className="space-y-4 p-4" onSubmit={(e) => { e.preventDefault(); setTipErr(null); pay.mutate(); }}>
+        <div className="rounded-2xl bg-black/[0.04] p-3 text-sm dark:bg-white/5">
           <p className="font-medium">{order.vehicle.brand} {order.vehicle.model} · <span className="font-mono">{order.vehicle.plate}</span>{order.clientName && ` · ${order.clientName}`}</p>
           <Row label="Total" value={money(order.total, cur)} />
           <Row label="Pagado" value={money(order.paid, cur)} />
           <Row bold label="Saldo" value={money(order.due, cur)} />
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Método de pago">
           {Object.entries(METHODS).map(([k, l]) => (
-            <button key={k} type="button" onClick={() => setMethod(k)} className={cn('rounded-lg border p-3 text-sm font-medium hover:bg-muted', method === k && 'border-primary bg-primary/10 text-primary')}>{l}</button>
+            <button key={k} type="button" role="radio" aria-checked={method === k} onClick={() => setMethod(k)} className={cn('h-12 rounded-2xl text-sm font-medium transition active:scale-95', method === k ? 'bg-primary text-primary-foreground shadow' : 'bg-black/5 dark:bg-white/10')}>{l}</button>
           ))}
         </div>
         <div>
           <Label>Monto a cobrar</Label>
-          <Input required autoFocus type="number" min="0.01" max={order.due} step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className="h-12 text-lg" />
+          <Input required autoFocus type="number" min="0.01" max={order.due} step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} className="h-12 rounded-2xl text-lg" />
           {partial && <p className="mt-1 text-xs text-amber-600">Pago parcial: quedará un saldo de {money(order.due - Number(amount), cur)}.</p>}
         </div>
-        <ErrorText error={pay.error} />
-        <Button size="lg" className="w-full" variant="success" disabled={pay.isPending}>{pay.isPending ? 'Cobrando…' : `Cobrar ${money(Number(amount) || 0, cur)}`}</Button>
+        {can('cash:tips') && <TipField base={Number(amount) || 0} value={tip} onChange={setTip} cur={cur} />}
+        {tipErr ? <p className="rounded-2xl bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">El pago se cobró, pero la propina no se registró: {tipErr}. Regístrala en la pestaña Propinas.</p> : <ErrorText error={pay.error} />}
+        {tipErr
+          ? <Button type="button" size="lg" className="h-12 w-full rounded-2xl" onClick={onDone}>Listo</Button>
+          : <Button size="lg" className="h-12 w-full rounded-2xl" variant="success" disabled={pay.isPending}>{pay.isPending ? 'Cobrando…' : `Cobrar ${money((Number(amount) || 0) + tipN, cur)}${tipN > 0 ? ' con propina' : ''}`}</Button>}
       </form>
     </Modal>
   );
 }
-
 function CloseModal({ data, cur, onClose, onDone }: { data: any; cur?: string; onClose: () => void; onDone: (id: string) => void }) {
   const f = data.figures;
   const [counted, setCounted] = useState('');
@@ -138,6 +150,10 @@ function CloseModal({ data, cur, onClose, onDone }: { data: any; cur?: string; o
           <Row label="+ Cobros de órdenes en efectivo" value={money(f.orders.CASH, cur)} />
           <Row label="+ Otros ingresos en efectivo" value={money(f.manualIncome.CASH, cur)} />
           <Row label="− Egresos en efectivo" value={money(f.expense.CASH, cur)} />
+          {f.tips && (f.tips.cashCollected > 0 || f.tips.cashPaidOut > 0) && <>
+            <Row label="+ Propinas recibidas en efectivo" value={money(f.tips.cashCollected, cur)} />
+            <Row label="- Propinas entregadas en efectivo" value={money(f.tips.cashPaidOut, cur)} />
+          </>}
           <Row bold label="Caja esperada" value={money(f.expectedCash, cur)} />
         </div>
         <div>
@@ -158,7 +174,7 @@ function CloseModal({ data, cur, onClose, onDone }: { data: any; cur?: string; o
   );
 }
 
-type Tab = 'summary' | 'sale' | 'receivables';
+type Tab = 'summary' | 'sale' | 'receivables' | 'tips';
 
 export default function CashPage() {
   const { user, can } = useAuth();
@@ -192,163 +208,174 @@ export default function CashPage() {
   const unsynced = locals.filter((l) => !l.data.folio);
   const unsyncedPaid = unsynced.reduce((s, l) => s + (l.data.payments ?? []).reduce((a: number, p: any) => a + Number(p.amount), 0), 0);
 
+  const tips = useTips();
+  const tipsPending = tips.data?.totals.pending ?? 0;
+  const tabItems: { k: Tab; label: string; icon: any; badge?: number }[] = [
+    ...(can('orders:create') ? [{ k: 'sale' as Tab, label: 'Vender', icon: ShoppingCart }] : []),
+    { k: 'summary', label: 'Resumen', icon: Receipt },
+    ...(can('cash:tips') || can('cash:view') ? [{ k: 'tips' as Tab, label: 'Propinas', icon: HandCoins }] : []),
+    { k: 'receivables', label: 'Por cobrar', icon: Wallet, badge: receivables.data?.length },
+  ];
+
   return (
-    <>
-      <PageHeader title="Caja">
-        <Input type="date" value={rf} onChange={(e) => setRf(e.target.value)} className="h-8 w-36" aria-label="Desde" />
-        <Input type="date" value={rt} onChange={(e) => setRt(e.target.value)} className="h-8 w-36" aria-label="Hasta" />
-        <DownloadButton type="cash-sessions" params={{ from: rf, to: rt }} label="Cortes" />
-        <DownloadButton type="cash-movements" params={{ from: rf, to: rt }} label="Movimientos" />
-      </PageHeader>
-      {!online && <p className="mb-3 rounded-md bg-amber-500/15 px-3 py-2 text-sm text-amber-800 dark:text-amber-300">Sin conexión: la caja necesita internet para registrar movimientos, cobrar y hacer el corte. Las ventas nuevas sí se guardan en el dispositivo y se suman a la caja al sincronizar.</p>}
+    <GlassPage>
+      <div className="mx-auto max-w-6xl space-y-4">
+        <header className="px-1">
+          <h1 className="text-3xl font-bold tracking-tight">Caja</h1>
+          <p className="text-sm text-muted-foreground">{d ? 'Turno abierto' : 'Abre la caja para vender y cobrar'}</p>
+        </header>
 
-      {current.isLoading ? <p className="text-sm text-muted-foreground">Cargando…</p> : !d ? (
-        <Card className="mx-auto max-w-md">
-          <CardHeader><CardTitle className="flex items-center gap-2"><Lock className="h-4 w-4" />Caja cerrada</CardTitle></CardHeader>
-          <CardContent>
-            <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); open.mutate(); }}>
-              <p className="text-sm text-muted-foreground">Abra la caja para vender y cobrar desde aquí y registrar ingresos y egresos. Se guardan usuario, fecha y hora de apertura. También puede seguir usando <Link href="/pos" className="text-primary underline">Nueva orden</Link>.</p>
-              <div><Label>Monto inicial (efectivo en el cajón) *</Label><Input required autoFocus type="number" min="0" step="0.01" inputMode="decimal" value={opening} onChange={(e) => setOpening(e.target.value)} className="h-12 text-lg" /></div>
-              <div><Label>Notas</Label><Input value={openNotes} onChange={(e) => setOpenNotes(e.target.value)} placeholder="Turno matutino" /></div>
-              <ErrorText error={open.error} />
-              <Button size="lg" className="w-full" disabled={open.isPending || !online || !can('cash:create')}><Unlock className="h-4 w-4" />Abrir caja</Button>
-            </form>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <p className="mb-3 text-sm text-muted-foreground">
-            <Badge className="mr-2 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">Abierta</Badge>
-            por <b>{d.session.openedByName}</b> desde {dateTime(d.session.openedAt)}{d.session.openingNotes && ` · ${d.session.openingNotes}`}
-          </p>
-          <div className="mb-1 flex gap-1 border-b">
-            {([['sale', 'Nueva venta', ShoppingCart], ['summary', 'Resumen', Receipt], ['receivables', `Por cobrar${receivables.data?.length ? ` (${receivables.data.length})` : ''}`, Receipt]] as const).filter(([k]) => k !== 'sale' || can('orders:create')).map(([k, label, Icon]) => (
-              <button key={k} onClick={() => setTab(k)} className={cn('-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium', tab === k ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground')}>
-                <Icon className="h-4 w-4" />{label}
-              </button>
-            ))}
-          </div>
+        {!online && (
+          <Glass className="border-amber-300/60 bg-amber-100/60 px-4 py-3 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+            Sin conexión: la caja necesita internet para registrar movimientos, cobrar y hacer el corte. Las ventas nuevas se guardan en el dispositivo y se suman al sincronizar.
+          </Glass>
+        )}
 
-          {tab === 'sale' ? (
-            <p className="mt-2 text-xs text-muted-foreground">Efectivo esperado en caja: <b>{money(f.expectedCash, cur)}</b> · {f.orders.count} ventas cobradas · Ingresos {money(f.totalIncome, cur)} · Egresos {money(f.totalExpense, cur)}</p>
-          ) : (
-          <>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Card><CardContent><p className="text-xs text-muted-foreground">Caja inicial</p><p className="mt-1 text-2xl font-semibold">{money(f.openingAmount, cur)}</p></CardContent></Card>
-            <Card><CardContent><p className="text-xs text-muted-foreground">Ingresos</p><p className="mt-1 text-2xl font-semibold text-emerald-600">{money(f.totalIncome, cur)}</p><p className="text-xs text-muted-foreground">{f.orders.count} {f.orders.count === 1 ? 'venta cobrada' : 'ventas cobradas'}</p></CardContent></Card>
-            <Card><CardContent><p className="text-xs text-muted-foreground">Egresos</p><p className="mt-1 text-2xl font-semibold text-red-600">{money(f.totalExpense, cur)}</p></CardContent></Card>
-            <Card className="border-primary/40 bg-primary/5"><CardContent><p className="text-xs text-muted-foreground">Efectivo esperado</p><p className="mt-1 text-2xl font-semibold">{money(f.expectedCash, cur)}</p></CardContent></Card>
-          </div>
-          {unsynced.length > 0 && (
-            <p className="mt-2 flex items-center gap-2 rounded-md bg-sky-500/10 px-3 py-2 text-sm text-sky-800 dark:text-sky-300">
-              <CloudOff className="h-4 w-4 shrink-0" />{unsynced.length} venta(s) sin sincronizar{unsyncedPaid > 0 && ` por ${money(unsyncedPaid, cur)}`}: se sumarán a la caja en cuanto se envíen al servidor.
-            </p>
-          )}
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {can('cash:create') && <Button variant="success" disabled={!online} onClick={() => setModal('INCOME')}><ArrowUpCircle className="h-4 w-4" />Registrar ingreso</Button>}
-            {can('cash:create') && <Button variant="destructive" disabled={!online} onClick={() => setModal('EXPENSE')}><ArrowDownCircle className="h-4 w-4" />Registrar egreso</Button>}
-            {can('cash:close') && <Button variant="outline" disabled={!online} onClick={() => setModal('CLOSE')}><Lock className="h-4 w-4" />Hacer corte</Button>}
-          </div>
-
-          </>
-          )}
-
-          {tab === 'summary' && (
-            <div className="mt-4 grid gap-4 lg:grid-cols-3">
-              <div className="space-y-4 lg:col-span-2">
-                <Card>
-                  <CardHeader><CardTitle>Movimientos de esta caja</CardTitle></CardHeader>
-                  <MovementsTable rows={d.movements} cur={cur} onDelete={can('cash:delete') ? (id) => del.mutate(id) : undefined} deleting={del.isPending} />
-                  <ErrorText error={del.error} />
-                </Card>
-                <Card>
-                  <CardHeader><CardTitle>Ventas cobradas en esta caja ({d.payments.length})</CardTitle></CardHeader>
-                  {d.payments.length === 0 ? <Empty text="Aún no hay cobros" /> : (
-                    <div className="divide-y text-sm">
-                      {d.payments.map((p: any) => (
-                        <Link key={p.id} href={`/orders/detail?id=${p.orderId}`} className="flex items-center justify-between gap-3 p-3 hover:bg-muted/50">
-                          <span>{p.folio} · {METHODS[p.method]} · <span className="text-muted-foreground">{dateTime(p.paidAt)}</span></span>
-                          <span className="font-medium text-emerald-600">+{money(p.amount, cur)}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  )}
-                </Card>
+        {current.isLoading ? <p className="text-sm text-muted-foreground">Cargando…</p> : !d ? (
+          <Glass className="mx-auto max-w-md p-6">
+            <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); open.mutate(); }}>
+              <div className="flex flex-col items-center text-center">
+                <span className="grid h-14 w-14 place-items-center rounded-full bg-slate-700 text-white shadow-lg"><Lock className="h-6 w-6" /></span>
+                <h2 className="mt-3 text-xl font-semibold">Caja cerrada</h2>
+                <p className="mt-1 text-xs text-muted-foreground">Se guardan usuario, fecha y hora de apertura. También puedes usar <Link href="/pos" className="text-primary underline">Nueva orden</Link>.</p>
               </div>
-              <Card className="h-fit">
-                <CardHeader><CardTitle>Cobros de órdenes (automático)</CardTitle></CardHeader>
-                <CardContent className="text-sm">
-                  <Row label="Efectivo" value={money(f.orders.CASH, cur)} />
-                  <Row label="Tarjeta" value={money(f.orders.CARD, cur)} />
-                  <Row label="Transferencia" value={money(f.orders.TRANSFER, cur)} />
-                  <Row bold label={`Total (${f.orders.count} cobros)`} value={money(f.orders.total, cur)} />
-                  <p className="mt-2 text-xs text-muted-foreground">Incluye lo vendido desde esta pantalla y desde Nueva orden. Se toman de los pagos de las órdenes desde la apertura; no hay que capturarlos otra vez.</p>
-                </CardContent>
-              </Card>
-            </div>
-          )}
-
-          {tab === 'sale' && (
-            <div className="mt-4">
-              <p className="mb-3 text-sm text-muted-foreground">Cada venta se cobra al momento y se suma a esta caja. (También puedes usar <Link href="/pos" className="text-primary underline">Nueva orden</Link>, que permite cobrar después.)</p>
-              <PosRegister cashMode />
-            </div>
-          )}
-
-          {tab === 'receivables' && (
-            <Card className="mt-4">
-              <CardHeader><CardTitle>Órdenes con saldo pendiente</CardTitle><span className="text-sm font-semibold text-amber-600">{money(dueTotal, cur)}</span></CardHeader>
-              {receivables.data?.length === 0 ? <Empty text="No hay cuentas por cobrar" /> : (
-                <div className="divide-y">
-                  {receivables.data?.map((o) => (
-                    <div key={o.id} className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
-                      <div className="min-w-0">
-                        <p className="font-medium">{o.folio} · {o.vehicle.brand} {o.vehicle.model} <span className="font-mono text-muted-foreground">{o.vehicle.plate}</span></p>
-                        <p className="text-xs text-muted-foreground">{o.clientName ?? 'Sin cliente'} · {dateTime(o.receivedAt)} · <span className={cn('rounded px-1.5', STATUS[o.status as Status].cls)}>{STATUS[o.status as Status].label}</span></p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-right"><p className="font-semibold text-amber-600">{money(o.due, cur)}</p><p className="text-xs text-muted-foreground">de {money(o.total, cur)}</p></div>
-                        {can('orders:edit_price') && <Link href={`/orders/detail?id=${o.id}`} className="text-xs text-primary underline">Editar precio</Link>}
-                        {can('orders:collect') && <Button size="sm" variant="success" disabled={!online} onClick={() => setCollect(o)}>Cobrar</Button>}
-                      </div>
-                    </div>
-                  ))}
+              <div>
+                <Label>Efectivo inicial en el cajón *</Label>
+                <Input required autoFocus type="number" min="0" step="0.01" inputMode="decimal" aria-label="Monto inicial" placeholder="0.00" value={opening} onChange={(e) => setOpening(e.target.value)} className="h-16 rounded-2xl text-center text-3xl font-semibold" />
+              </div>
+              <div><Label>Notas</Label><Input value={openNotes} onChange={(e) => setOpenNotes(e.target.value)} placeholder="Turno matutino" className="rounded-2xl" /></div>
+              <ErrorText error={open.error} />
+              <Button size="lg" className="h-12 w-full rounded-2xl text-base" disabled={open.isPending || !online || !can('cash:create')}><Unlock className="h-4 w-4" />Abrir caja</Button>
+            </form>
+          </Glass>
+        ) : (
+          <>
+            {/* Tarjeta principal */}
+            <Glass className="relative overflow-hidden p-5">
+              <div aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full bg-primary/25 blur-3xl" />
+              <div className="relative">
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 font-medium text-emerald-700 dark:text-emerald-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />Abierta</span>
+                  <span className="truncate text-muted-foreground">{d.session.openedByName} · {dateTime(d.session.openedAt)}</span>
                 </div>
-              )}
-            </Card>
-          )}
-        </>
-      )}
+                <p className="mt-4 text-xs font-medium uppercase tracking-wide text-muted-foreground">Efectivo esperado</p>
+                <p className="text-4xl font-semibold tabular-nums tracking-tight sm:text-5xl" data-testid="expected-cash">{money(f.expectedCash, cur)}</p>
+                {d.session.openingNotes && <p className="mt-1 text-xs text-muted-foreground">{d.session.openingNotes}</p>}
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  <Mini label="Inicial" value={money(f.openingAmount, cur)} />
+                  <Mini label="Ingresos" tone="green" value={money(f.totalIncome, cur)} sub={`${f.orders.count} ${f.orders.count === 1 ? 'venta' : 'ventas'}`} />
+                  <Mini label="Egresos" tone="red" value={money(f.totalExpense, cur)} />
+                </div>
+                {tipsPending > 0.004 && (
+                  <button type="button" onClick={() => setTab('tips')} className="mt-2 flex w-full items-center justify-between rounded-2xl bg-amber-500/15 px-3 py-2 text-left text-sm text-amber-800 active:scale-[0.99] dark:text-amber-200">
+                    <span className="flex items-center gap-2"><HandCoins className="h-4 w-4" />Propinas por entregar</span>
+                    <span className="flex items-center gap-1 font-semibold">{money(tipsPending, cur)}<ChevronRight className="h-4 w-4" /></span>
+                  </button>
+                )}
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                  {can('cash:create') && <Action icon={ArrowUpCircle} tone="green" label="Ingreso" disabled={!online} onClick={() => setModal('INCOME')} />}
+                  {can('cash:create') && <Action icon={ArrowDownCircle} tone="red" label="Egreso" disabled={!online} onClick={() => setModal('EXPENSE')} />}
+                  {can('cash:close') && <Action icon={Lock} tone="slate" label="Corte" disabled={!online} onClick={() => setModal('CLOSE')} />}
+                </div>
+              </div>
+            </Glass>
 
-      <h2 className="mb-2 mt-8 text-sm font-semibold">Historial de cortes</h2>
-      <Card className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="border-b text-left text-xs text-muted-foreground">
-            <tr><th className="p-3">Apertura</th><th>Usuario</th><th className="text-right">Inicial</th><th className="text-right">Ingresos</th><th className="text-right">Egresos</th><th className="text-right">Esperada</th><th className="text-right">Real</th><th className="text-right">Diferencia</th><th /></tr>
-          </thead>
-          <tbody className="divide-y">
-            {sessions.data?.map((s) => (
-              <tr key={s.id}>
-                <td className="p-3">{dateTime(s.openedAt)}</td>
-                <td>{s.openedByName}</td>
-                <td className="text-right">{money(s.openingAmount, cur)}</td>
-                <td className="text-right text-emerald-600">{money(s.totalIncome, cur)}</td>
-                <td className="text-right text-red-600">{money(s.totalExpense, cur)}</td>
-                <td className="text-right">{money(s.expectedCash, cur)}</td>
-                <td className="text-right">{s.countedCash != null ? money(s.countedCash, cur) : <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">Abierta</Badge>}</td>
-                <td className={cn('text-right font-medium', s.difference < 0 && 'text-red-600', s.difference > 0 && 'text-sky-600')}>{s.difference != null ? money(s.difference, cur) : '—'}</td>
-                <td className="pr-3 text-right"><Link href={`/cash/session?id=${s.id}`} className="inline-flex items-center gap-1 text-primary hover:underline"><FileText className="h-4 w-4" />Ver</Link></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {sessions.data?.length === 0 && <Empty text="Aún no hay cortes" />}
-      </Card>
+            {unsynced.length > 0 && (
+              <Glass className="flex items-center gap-2 border-sky-300/60 bg-sky-100/60 px-4 py-3 text-sm text-sky-900 dark:bg-sky-500/10 dark:text-sky-200">
+                <CloudOff className="h-4 w-4 shrink-0" />{unsynced.length} venta(s) sin sincronizar{unsyncedPaid > 0 && ` por ${money(unsyncedPaid, cur)}`}: se sumarán a la caja al enviarse al servidor.
+              </Glass>
+            )}
+
+            <Segmented label="Secciones de la caja" value={tab} onChange={setTab} items={tabItems} />
+
+            {tab === 'sale' && (
+              <div>
+                <p className="mb-3 px-2 text-xs text-muted-foreground">Cada venta se cobra al momento y se suma a esta caja. (En <Link href="/pos" className="text-primary underline">Nueva orden</Link> puedes cobrar después.)</p>
+                <PosRegister cashMode />
+              </div>
+            )}
+
+            {tab === 'summary' && (
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-3">
+                <div className="min-w-0 space-y-4 lg:col-span-2">
+                  <Section title="Movimientos de esta caja">
+                    <MovementsTable rows={d.movements} cur={cur} onDelete={can('cash:delete') ? (id) => del.mutate(id) : undefined} deleting={del.isPending} />
+                    <ErrorText error={del.error} />
+                  </Section>
+                  <Section title={`Ventas cobradas (${d.payments.length})`}>
+                    {d.payments.length === 0 ? <Empty text="Aún no hay cobros" /> : d.payments.map((p: any) => (
+                      <Link key={p.id} href={`/orders/detail?id=${p.orderId}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm active:bg-black/5">
+                        <span className="min-w-0 truncate">{p.folio} · {METHODS[p.method]} · <span className="text-muted-foreground">{dateTime(p.paidAt)}</span></span>
+                        <span className="shrink-0 font-semibold tabular-nums text-emerald-600">+{money(p.amount, cur)}</span>
+                      </Link>
+                    ))}
+                  </Section>
+                </div>
+                <Section title="Cobros por método" className="h-fit min-w-0">
+                  <div className="space-y-1 p-4 text-sm">
+                    <Row label="Efectivo" value={money(f.orders.CASH, cur)} />
+                    <Row label="Tarjeta" value={money(f.orders.CARD, cur)} />
+                    <Row label="Transferencia" value={money(f.orders.TRANSFER, cur)} />
+                    <Row bold label={`Total (${f.orders.count} cobros)`} value={money(f.orders.total, cur)} />
+                    <p className="pt-2 text-xs text-muted-foreground">Incluye lo vendido aquí y en Nueva orden; se toman de los pagos, no hay que capturarlos otra vez.</p>
+                  </div>
+                </Section>
+              </div>
+            )}
+
+            {tab === 'tips' && <TipsPanel cur={cur} />}
+
+            {tab === 'receivables' && (
+              <Section title="Órdenes con saldo pendiente" right={<span className="text-sm font-semibold tabular-nums text-amber-600">{money(dueTotal, cur)}</span>}>
+                {receivables.data?.length === 0 ? <Empty text="No hay cuentas por cobrar" /> : receivables.data?.map((o) => (
+                  <div key={o.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
+                    <div className="min-w-0">
+                      <p className="font-medium">{o.folio} · {o.vehicle.brand} {o.vehicle.model} <span className="font-mono text-muted-foreground">{o.vehicle.plate}</span></p>
+                      <p className="text-xs text-muted-foreground">{o.clientName ?? 'Sin cliente'} · {dateTime(o.receivedAt)} · <span className={cn('rounded px-1.5', STATUS[o.status as Status].cls)}>{STATUS[o.status as Status].label}</span></p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right"><p className="font-semibold tabular-nums text-amber-600">{money(o.due, cur)}</p><p className="text-xs text-muted-foreground">de {money(o.total, cur)}</p></div>
+                      {can('orders:edit_price') && <Link href={`/orders/detail?id=${o.id}`} className="text-xs text-primary underline">Editar precio</Link>}
+                      {can('orders:collect') && <Button size="sm" variant="success" className="rounded-full px-4" disabled={!online} onClick={() => setCollect(o)}>Cobrar</Button>}
+                    </div>
+                  </div>
+                ))}
+              </Section>
+            )}
+          </>
+        )}
+
+        <Section
+          title="Historial de cortes"
+          right={
+            <div className="flex flex-wrap items-center gap-2">
+              <Input type="date" value={rf} onChange={(e) => setRf(e.target.value)} className="h-8 w-32 rounded-xl text-xs" aria-label="Desde" />
+              <Input type="date" value={rt} onChange={(e) => setRt(e.target.value)} className="h-8 w-32 rounded-xl text-xs" aria-label="Hasta" />
+              <DownloadButton type="cash-sessions" params={{ from: rf, to: rt }} label="Cortes" />
+              <DownloadButton type="cash-movements" params={{ from: rf, to: rt }} label="Movimientos" />
+            </div>
+          }
+        >
+          {sessions.data?.length === 0 && <Empty text="Aún no hay cortes" />}
+          {sessions.data?.map((s) => (
+            <Link key={s.id} href={`/cash/session?id=${s.id}`} className="flex items-center gap-3 px-4 py-3 text-sm active:bg-black/5">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">{dateTime(s.openedAt)}</p>
+                <p className="truncate text-xs text-muted-foreground">{s.openedByName} · Inicial {money(s.openingAmount, cur)}<span className="hidden md:inline"> · Ingresos {money(s.totalIncome, cur)} · Egresos {money(s.totalExpense, cur)}</span></p>
+              </div>
+              <div className="text-right">
+                <p className="font-semibold tabular-nums">{s.countedCash != null ? money(s.countedCash, cur) : <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">Abierta</Badge>}</p>
+                {s.difference != null && <p className={cn('text-xs tabular-nums', s.difference < 0 ? 'text-red-600' : s.difference > 0 ? 'text-sky-600' : 'text-emerald-600')}>{s.difference === 0 ? 'Cuadrada' : money(s.difference, cur)}</p>}
+              </div>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </Link>
+          ))}
+        </Section>
+      </div>
 
       {modal === 'INCOME' || modal === 'EXPENSE' ? <MovementModal type={modal} onClose={() => setModal(null)} onDone={() => { setModal(null); refresh(); }} /> : null}
       {modal === 'CLOSE' && d && <CloseModal data={d} cur={cur} onClose={() => setModal(null)} onDone={(id) => { setModal(null); refresh(); router.push(`/cash/session?id=${id}`); }} />}
       {collect && <CollectModal order={collect} cur={cur} onClose={() => setCollect(null)} onDone={() => { setCollect(null); refresh(); }} />}
-    </>
+    </GlassPage>
   );
 }

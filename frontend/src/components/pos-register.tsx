@@ -7,13 +7,20 @@ import { Banknote, Camera, ChevronDown, CreditCard, Landmark, Mic, Minus, Plus, 
 import { api } from '@/lib/api';
 import { useOnline } from '@/lib/net';
 import { getDb } from '@/lib/offline/db';
-import { createOrderOffline, discardOp, waitForOp } from '@/lib/offline/sync';
+import { addPhotoOffline, createOrderOffline, discardOp, waitForOp } from '@/lib/offline/sync';
+import { compressImage } from '@/lib/api';
+import { scanRear } from '@/lib/vehicle-scan';
+import { VoiceFill, type FillField } from '@/components/voice-fill';
 import { useAuth } from '@/lib/auth';
 import { cn, money } from '@/lib/utils';
 import { Button, ErrorText, Input, Label, Select, Textarea, buttonClass } from '@/components/ui';
 import { Combobox } from '@/components/combobox';
 import { VoiceFab, VoiceMode, type VoiceDraft } from '@/components/voice-mode';
 import { ClientSuggest, SelectedClientNote } from '@/components/client-suggest';
+import { TipField, sendTip } from '@/components/tips';
+import { CarArt } from '@/components/car-art';
+import { GlassPage } from '@/components/glass';
+import { Portal } from '@/components/portal';
 import { findByPlate, useClientIndex, type ClientLite } from '@/lib/clients';
 import { TicketActions, TicketView } from '@/components/ticket';
 
@@ -27,20 +34,33 @@ const PAY_OPTIONS = [
 const emptyV = { plate: '', brand: '', model: '', color: '' };
 const emptyC = { name: '', phone: '', email: '', contactPreference: 'NONE' };
 
-function Modal({ title, onClose, children }: { title: string; onClose?: () => void; children: React.ReactNode }) {
+/** Sección agrupada tipo iOS dentro de la ventana. */
+const Group = ({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) => (
+  <section>
+    <div className="mb-1.5 flex items-center justify-between px-1"><p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>{right}</div>
+    <div className="rounded-3xl border border-black/5 bg-white/75 p-3 shadow-sm dark:border-white/10 dark:bg-white/5">{children}</div>
+  </section>
+);
+const SWATCH: Record<string, string> = { Blanco: '#ffffff', Negro: '#111827', Gris: '#8b9099', Plata: '#c7ccd4', Rojo: '#dc2626', Azul: '#2563eb', Verde: '#16a34a', Vino: '#7f1d1d' };
+
+/** Ventana de la venta: vidrio, se dibuja en <body> (por encima de las barras) y en celular sube desde abajo. */
+function Modal({ title, onClose, children, footer }: { title: string; onClose?: () => void; children: React.ReactNode; footer?: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
-      <div className="flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-xl border bg-card shadow-xl sm:rounded-xl">
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <h2 className="font-semibold">{title}</h2>
-          {onClose && <Button variant="ghost" size="icon" onClick={onClose} aria-label="Cerrar"><X className="h-4 w-4" /></Button>}
+    <Portal>
+      <div className="fixed inset-0 z-[55] flex items-end justify-center bg-black/30 p-0 backdrop-blur-sm sm:items-center sm:p-4 print:hidden">
+        <div className="flex max-h-[94dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-white/60 bg-card/90 shadow-2xl backdrop-blur-2xl sm:rounded-3xl dark:border-white/10">
+          <div aria-hidden className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-black/15 sm:hidden dark:bg-white/20" />
+          <div className="flex items-center justify-between border-b border-black/5 px-4 py-3">
+            <h2 className="font-semibold">{title}</h2>
+            {onClose && <Button variant="ghost" size="icon" onClick={onClose} aria-label="Cerrar"><X className="h-4 w-4" /></Button>}
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
+          {footer && <div className="shrink-0 border-t border-black/5 bg-white/80 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/80">{footer}</div>}
         </div>
-        <div className="overflow-y-auto">{children}</div>
       </div>
-    </div>
+    </Portal>
   );
 }
-
 export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
   const { user, can } = useAuth();
   const canPrice = can('orders:edit_price');
@@ -57,8 +77,11 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
   /** Precios editados para esta orden (el del catálogo no cambia) */
   const [ov, setOv] = useState<Record<string, number>>({});
   const [discount, setDiscount] = useState('');
+  const [tip, setTip] = useState('');
   const [open, setOpen] = useState(false);
   const [v, setV] = useState(emptyV);
+  const vRef = useRef(v);
+  vRef.current = v;
   const [c, setC] = useState(emptyC);
   const [clientId, setClientId] = useState<string | undefined>();
   const clients = useClientIndex();
@@ -69,6 +92,11 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
   const [method, setMethod] = useState(cashMode ? 'CASH' : 'LATER'); // Nueva orden: «Cobrar después» por defecto
   const [ocrMsg, setOcrMsg] = useState('');
   const [ocrBusy, setOcrBusy] = useState(false);
+  /** Foto trasera: se usa para detectar placa/marca/modelo/color y se guarda en la orden como foto «Trasera». */
+  const [rear, setRear] = useState<{ blob: Blob; url: string } | null>(null);
+  const [scanFound, setScanFound] = useState<string[]>([]);
+  /** Campos que la foto no pudo leer: se piden por voz (micrófono automático). */
+  const [voiceFill, setVoiceFill] = useState<{ k: number; missing: FillField[] } | null>(null);
   const [done, setDone] = useState<any>(null);
   const online = useOnline();
   const [saving, setSaving] = useState(false);
@@ -105,6 +133,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
     discount: number;
     washerId?: string;
     method: string;
+    tip?: number;
   }, opts: { silent?: boolean } = {}) {
     const washerName = washers.data?.find((w) => w.id === p.washerId)?.fullName;
     const { id, code, opId } = await createOrderOffline({
@@ -118,6 +147,8 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
       assignedToName: washerName,
       payment: p.method === 'LATER' ? null : { method: p.method },
     });
+    // la foto trasera queda en la orden (se sube sola; también sin conexión)
+    if (rear && !opts.silent) await addPhotoOffline(id, 'REAR', rear.blob).catch(() => undefined);
     const r = await waitForOp(opId, online ? 5000 : 0);
     if (r.state === 'failed') {
       // El servidor rechazó la orden (p. ej. un servicio que ya está inactivo): se descarta y se corrige en pantalla
@@ -128,10 +159,17 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
     const server = qc.getQueryData<any>(['order', id]);
     // para el ticket: la orden del servidor o, si aun no se sincroniza, la copia local (con precios estimados)
     const order = server ?? (await getDb().orders.get(id))?.data;
+    // Propina: se registra en la caja abierta (requiere conexión y orden ya sincronizada)
+    let tipNote: string | null = null;
+    const tipAmount = p.method === 'LATER' ? 0 : p.tip ?? 0;
+    if (tipAmount > 0) {
+      tipNote = r.state === 'synced' ? await sendTip({ amount: tipAmount, method: p.method, orderId: id, washerId: p.washerId || undefined }) : 'La orden aún no se sincroniza: registra la propina en Caja > Propinas.';
+      if (!tipNote) qc.invalidateQueries({ queryKey: ['cash'] });
+    }
     if (!opts.silent) {
       setOpen(false);
       setVoiceOpen(false);
-      setDone({ id, code, folio: server?.folio ?? null, pending: r.state !== 'synced', order });
+      setDone({ id, code, folio: server?.folio ?? null, pending: r.state !== 'synced', order, tip: tipAmount > 0 ? { amount: tipAmount, error: tipNote } : null });
     }
     qc.invalidateQueries({ queryKey: ['orders'] });
     qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -151,6 +189,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
         discount: disc,
         washerId: washer,
         method,
+        tip: Number(tip) || 0,
       });
     } catch (e) {
       setSaveError((e as Error).message);
@@ -220,28 +259,43 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
   }
 
   function reset() {
-    setDone(null); setV(emptyV); setC(emptyC); setClientId(undefined); setOv({}); setQty({}); setNotes(''); setDiscount('');
-    setMethod(cashMode ? 'CASH' : 'LATER'); setWasher(''); setOcrMsg(''); setShowClient(false); setSaveError('');
+    setDone(null); setV(emptyV); setC(emptyC); setClientId(undefined); setOv({}); setTip(''); setQty({}); setNotes(''); setDiscount('');
+    setMethod(cashMode ? 'CASH' : 'LATER'); setWasher(''); setOcrMsg(''); setScanFound([]); setVoiceFill(null); setRear((old) => { if (old) URL.revokeObjectURL(old.url); return null; }); setShowClient(false); setSaveError('');
   }
 
+  /** Foto trasera: detecta en el dispositivo la placa, marca/modelo (emblemas) y color; solo rellena lo que esté vacío. */
   async function runOcr(file: File) {
-    setOcrBusy(true);
-    setOcrMsg('Leyendo placa…');
+    setOcrBusy(true); setScanFound([]);
+    setOcrMsg('Analizando la foto trasera…');
     try {
-      const { createWorker } = await import('tesseract.js');
-      const w = await createWorker('eng');
-      await w.setParameters({ tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-' });
-      const { data } = await w.recognize(file);
-      await w.terminate();
-      const cand = data.text.toUpperCase().split(/\s+/).map((t) => t.replace(/[^A-Z0-9]/g, '')).filter((t) => t.length >= 5 && t.length <= 8).sort((a, b) => b.length - a.length)[0];
-      if (cand) { setV((p) => ({ ...p, plate: cand })); setOcrMsg(`Placa detectada: ${cand}. Verifíquela.`); }
-      else setOcrMsg('No se pudo leer la placa. Captúrela manualmente.');
+      const blob = await compressImage(file);
+      setRear((old) => { if (old) URL.revokeObjectURL(old.url); return { blob, url: URL.createObjectURL(blob) }; });
+      const r = await scanRear(blob, catalog.data ?? []);
+      if (typeof console !== 'undefined') console.debug('[foto trasera] leído:', r.words.join(' '));
+      const cur = vRef.current;
+      const n = { ...cur };
+      const found: string[] = [];
+      if (r.plate && !cur.plate.trim()) { n.plate = r.plate; found.push(`placa ${r.plate}`); }
+      if (r.brand && !cur.brand.trim()) { n.brand = r.brand; found.push(r.brand); }
+      if (r.model && !cur.model.trim()) { n.model = r.model; found.push(r.model); }
+      if (r.color && !cur.color.trim()) { n.color = r.color; found.push(`color ${r.color}`); }
+      setV(n);
+      // placa ya registrada: trae su vehículo y cliente (sin pisar lo detectado)
+      const hit = n.plate ? findByPlate(clients, n.plate) : undefined;
+      if (hit && !clientId && !c.name && !c.phone) pickClient({ ...hit.client, vehicles: [] });
+      setScanFound(found);
+      const still = ([!n.plate.trim() && 'placa', !n.brand.trim() && 'marca', !n.model.trim() && 'modelo', !n.color.trim() && 'color'].filter(Boolean)) as FillField[];
+      setVoiceFill(still.length ? { k: Date.now(), missing: still } : null);
+      const missing = [!r.plate && 'placa', !r.brand && 'marca', !r.model && 'modelo', !r.color && 'color'].filter(Boolean);
+      setOcrMsg(r.ocrError ?? (found.length ? `Detectado: ${found.join(' · ')}.${missing.length ? ` No se leyó: ${missing.join(', ')}.` : ''} Verifícalo.` : 'No se pudo leer la foto. Captura los datos a mano.'));
     } catch {
-      setOcrMsg('OCR no disponible (requiere internet la primera vez). Capture la placa manualmente.');
+      setOcrMsg('No se pudo analizar la foto. Captura los datos a mano.');
     } finally {
       setOcrBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
     }
   }
+
 
   const brandNames = (catalog.data ?? []).map((b) => b.brand);
   // Abreviaturas comunes -> nombre en el catalogo
@@ -263,142 +317,169 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
 
   const validVehicle = v.plate.trim().length >= 3 && v.brand.trim() && v.model.trim() && v.color.trim();
 
+  const Root: any = cashMode ? 'div' : GlassPage;
+  const missing = [v.plate.trim().length < 3 && 'placa', !v.brand.trim() && 'marca', !v.model.trim() && 'modelo', !v.color.trim() && 'color'].filter(Boolean) as string[];
   const checkoutForm = (
-          <form id="checkout-form"
-            className="space-y-5 p-4"
-            onSubmit={(e) => { e.preventDefault(); if (validVehicle) void submitOrder(); }}
-          >
-            {!cashMode && (
-              <div>
-                <p className="mb-2 text-sm font-semibold">Servicios</p>
-                <div className="space-y-2">
-                  {lines.map((l) => (
-                    <div key={l.id} className="flex items-center gap-2 text-sm">
-                      <span className="min-w-0 flex-1 truncate font-medium">{l.name}</span>
-                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label={`Menos ${l.name}`} onClick={() => (qty[l.id] > 1 ? add(l.id, -1) : removeLine(l.id))}><Minus className="h-3 w-3" /></Button>
-                      <span className="w-5 text-center">{qty[l.id]}</span>
-                      <Button type="button" variant="outline" size="icon" className="h-8 w-8" aria-label={`Más ${l.name}`} onClick={() => add(l.id)}><Plus className="h-3 w-3" /></Button>
-                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={`Quitar ${l.name}`} onClick={() => removeLine(l.id)}><Trash2 className="h-3 w-3" /></Button>
-                    </div>
-                  ))}
-                  {all.some((s) => !(qty[s.id] > 0)) && (
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <span className="self-center text-xs text-muted-foreground">Agregar:</span>
-                      {all.filter((s) => !(qty[s.id] > 0)).map((s) => (
-                        <button key={s.id} type="button" onClick={() => add(s.id)} className="rounded-full border px-3 py-1 text-xs hover:bg-muted">+ {s.name} · {money(s.price, cur)}</button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+    <form id="checkout-form" className="space-y-4 p-4" onSubmit={(e) => { e.preventDefault(); if (validVehicle) void submitOrder(); }}>
+      <Group title="Servicios">
+        <div className="divide-y divide-black/5 dark:divide-white/10">
+          {lines.map((l) => (
+            <div key={l.id} className="flex items-center gap-3 py-2 first:pt-0 last:pb-0">
+              <CarArt name={l.name} className="h-11 w-14 shrink-0 rounded-xl" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">{l.name}</p>
+                <p className="truncate text-xs text-muted-foreground">{l.description || 'Sin descripción'}</p>
               </div>
-            )}
-            <div>
-              <p className="mb-2 text-sm font-semibold">Vehículo</p>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="sm:col-span-3">
-                  <Label>Placa *</Label>
-                  <div className="flex gap-2">
-                    <Input autoFocus={!cashMode} value={v.plate} onChange={(e) => onPlate(e.target.value.toUpperCase())} placeholder="ABC123" className="font-mono uppercase" />
-                    <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
-                    <Button type="button" variant="outline" disabled={ocrBusy} onClick={() => fileRef.current?.click()}><Camera className="h-4 w-4" />Escanear</Button>
-                  </div>
-                  {ocrMsg && <p className="mt-1 text-xs text-muted-foreground">{ocrMsg}</p>}
-                </div>
-                <div>
-                  <Label>Marca *</Label>
-                  <Combobox
-                    value={v.brand}
-                    placeholder="Ej. VW, Nissan"
-                    options={brandNames}
-                    match={brandMatch}
-                    onChange={changeBrand}
-                    onPick={(b) => setV((p) => ({ ...p, brand: b, model: '' }))}
-                    onBlurValue={(t) => { const b = resolveBrand(t); if (b && b !== v.brand) setV((p) => ({ ...p, brand: b, model: b === resolveBrand(p.brand) ? p.model : '' })); }}
-                  />
-                </div>
-                <div>
-                  <Label>Modelo *</Label>
-                  <Combobox
-                    value={v.model}
-                    placeholder={currentBrand ? `Modelos de ${currentBrand.brand}` : 'Elija primero la marca'}
-                    options={brandModels}
-                    onChange={(t) => setV({ ...v, model: t })}
-                  />
-                </div>
-                <div>
-                  <Label>Color *</Label>
-                  <Combobox value={v.color} placeholder="Rojo" options={COLORS} onChange={(t) => setV({ ...v, color: t })} />
-                </div>
+              <div className="flex shrink-0 items-center rounded-full bg-black/5 p-0.5 dark:bg-white/10">
+                <button type="button" aria-label={qty[l.id] > 1 ? `Menos ${l.name}` : `Quitar ${l.name}`} onClick={() => (qty[l.id] > 1 ? add(l.id, -1) : removeLine(l.id))} className="grid h-8 w-8 place-items-center rounded-full bg-white shadow-sm active:scale-90 dark:bg-white/15">
+                  {qty[l.id] > 1 ? <Minus className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5 text-red-500" />}
+                </button>
+                <span className="w-7 text-center text-sm font-semibold tabular-nums">{qty[l.id]}</span>
+                <button type="button" aria-label={`Más ${l.name}`} onClick={() => add(l.id)} className="grid h-8 w-8 place-items-center rounded-full bg-white shadow-sm active:scale-90 dark:bg-white/15"><Plus className="h-3.5 w-3.5" /></button>
               </div>
             </div>
+          ))}
+        </div>
+        {all.some((s) => !(qty[s.id] > 0)) && (
+          <div className="-mx-3 mt-3 flex gap-2 overflow-x-auto px-3 [scrollbar-width:none]" aria-label="Agregar otro servicio">
+            {all.filter((s) => !(qty[s.id] > 0)).map((s) => (
+              <button key={s.id} type="button" onClick={() => add(s.id)} className="shrink-0 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary active:scale-95">+ {s.name} · {money(s.price, cur)}</button>
+            ))}
+          </div>
+        )}
+      </Group>
 
+      <Group title="Vehículo" right={picked ? <span className="text-[11px] font-medium text-emerald-600">Cliente registrado</span> : undefined}>
+        <div className="space-y-3">
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={ocrBusy} aria-label="Tomar foto trasera"
+            className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-primary/40 bg-primary/5 p-2.5 text-left transition active:scale-[0.99] disabled:opacity-60">
+            {rear ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={rear.url} alt="Foto trasera" className="h-14 w-20 shrink-0 rounded-xl object-cover" />
+            ) : <span className="grid h-14 w-20 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><Camera className="h-6 w-6" /></span>}
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold">{ocrBusy ? 'Analizando foto…' : rear ? 'Cambiar foto trasera' : 'Tomar foto trasera'}</span>
+              <span className="block text-xs text-muted-foreground">{ocrMsg || 'Detecta placa, marca, modelo y color, y se guarda en la orden'}</span>
+            </span>
+            {ocrBusy && <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />}
+          </button>
+          {voiceFill && (
+            <VoiceFill key={voiceFill.k} missing={voiceFill.missing} catalog={catalog.data ?? []} onClose={() => setVoiceFill(null)}
+              onFill={(f) => setV((p) => ({ ...p, ...(f.plate && !p.plate.trim() ? { plate: f.plate } : {}), ...(f.brand && !p.brand.trim() ? { brand: f.brand } : {}), ...(f.model && !p.model.trim() ? { model: f.model } : {}), ...(f.color && !p.color.trim() ? { color: f.color } : {}) }))} />
+          )}
+          {scanFound.length > 0 && <div className="flex flex-wrap gap-1.5">{scanFound.map((f) => <span key={f} className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">✓ {f}</span>)}</div>}
+          <div className="relative">
+            <Input aria-label="Placa" autoFocus={typeof window !== 'undefined' && window.innerWidth >= 640} value={v.plate} onChange={(e) => onPlate(e.target.value.toUpperCase())} placeholder="ABC123" className="h-14 rounded-2xl text-center font-mono text-2xl uppercase tracking-[0.2em]" />
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
+
+          </div>
+          <div className="grid grid-cols-2 gap-2">
             <div>
-              <button type="button" className="flex w-full items-center justify-between text-sm font-semibold" onClick={() => setShowClient(!showClient)}>
-                Cliente y observaciones <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">opcional <ChevronDown className={cn('h-4 w-4 transition', showClient && 'rotate-180')} /></span>
+              <Label className="text-xs">Marca *</Label>
+              <Combobox
+                value={v.brand}
+                placeholder="Ej. VW, Nissan"
+                options={brandNames}
+                match={brandMatch}
+                onChange={changeBrand}
+                onPick={(b) => setV((p) => ({ ...p, brand: b, model: '' }))}
+                onBlurValue={(t) => { const b = resolveBrand(t); if (b && b !== v.brand) setV((p) => ({ ...p, brand: b, model: b === resolveBrand(p.brand) ? p.model : '' })); }}
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Modelo *</Label>
+              <Combobox value={v.model} placeholder={currentBrand ? `Modelos de ${currentBrand.brand}` : 'Elija la marca'} options={brandModels} onChange={(t) => setV({ ...v, model: t })} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Color *</Label>
+            <div className="mb-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Color rápido">
+              {Object.entries(SWATCH).map(([name, hex]) => (
+                <button key={name} type="button" role="radio" aria-checked={v.color === name} aria-label={name} title={name} onClick={() => setV({ ...v, color: name })}
+                  className={cn('h-8 w-8 rounded-full border border-black/15 shadow-sm transition active:scale-90', v.color === name && 'ring-2 ring-primary ring-offset-2 ring-offset-white dark:ring-offset-slate-900')} style={{ background: hex }} />
+              ))}
+            </div>
+            <Combobox value={v.color} placeholder="Otro color" options={COLORS} onChange={(t) => setV({ ...v, color: t })} />
+          </div>
+        </div>
+      </Group>
+
+      <Group title="Cobro">
+        <div className="space-y-3">
+          <div className={cn('grid gap-1.5', cashMode ? 'grid-cols-3' : 'grid-cols-4')} role="radiogroup" aria-label="Método de pago">
+            {PAY_OPTIONS.filter((p) => !cashMode || p.value !== 'LATER').map((p) => (
+              <button key={p.value} type="button" role="radio" aria-checked={method === p.value} onClick={() => setMethod(p.value)}
+                className={cn('flex h-14 flex-col items-center justify-center gap-0.5 rounded-2xl text-[11px] font-medium leading-tight transition active:scale-95', method === p.value ? 'bg-primary text-primary-foreground shadow' : 'bg-black/5 text-foreground dark:bg-white/10')}>
+                <p.icon className="h-5 w-5 shrink-0" /><span className="max-w-full truncate px-1">{p.value === 'LATER' ? 'Después' : p.label}</span>
               </button>
-              {showClient && (
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div className="sm:col-span-2"><SelectedClientNote client={picked} onClear={() => setClientId(undefined)} /></div>
-                  <div><Label>Nombre</Label><Input value={c.name} autoComplete="off" onChange={(e) => { setClientId(undefined); setC({ ...c, name: e.target.value }); }} /><ClientSuggest clients={clients} query={c.name} selectedId={clientId} onPick={pickClient} /></div>
-                  <div><Label>Teléfono</Label><Input type="tel" inputMode="tel" autoComplete="off" value={c.phone} onChange={(e) => { setClientId(undefined); setC({ ...c, phone: e.target.value }); }} placeholder="10 dígitos" /><ClientSuggest clients={clients} query={c.phone} selectedId={clientId} onPick={pickClient} /></div>
-                  <div><Label>Correo</Label><Input type="email" value={c.email} onChange={(e) => setC({ ...c, email: e.target.value })} /></div>
-                  <div><Label>Preferencia de contacto</Label>
-                    <Select value={c.contactPreference} onChange={(e) => setC({ ...c, contactPreference: e.target.value })}>
-                      <option value="NONE">Ninguno</option><option value="WHATSAPP">WhatsApp</option><option value="EMAIL">Correo</option>
-                    </Select>
-                  </div>
-                  <div className="sm:col-span-2"><Label>Observaciones</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Rayones, objetos de valor, etc." /></div>
-                </div>
-              )}
-            </div>
-
+            ))}
+          </div>
+          {can('cash:tips') && method !== 'LATER' && <TipField base={total} value={tip} onChange={setTip} cur={cur} />}
+          <div className="grid grid-cols-2 gap-2">
             <div>
-              <p className="mb-2 text-sm font-semibold">Método de pago</p>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {PAY_OPTIONS.filter((p) => !cashMode || p.value !== 'LATER').map((p) => (
-                  <button
-                    key={p.value}
-                    type="button"
-                    onClick={() => setMethod(p.value)}
-                    className={cn('flex flex-col items-center gap-1 rounded-lg border p-3 text-xs font-medium hover:bg-muted', method === p.value && 'border-primary bg-primary/10 text-primary')}
-                  >
-                    <p.icon className="h-5 w-5" />{p.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <Label>Lavador asignado</Label>
-              <Select value={washer} onChange={(e) => setWasher(e.target.value)}>
+              <Label className="text-xs">Lavador</Label>
+              <Select value={washer} onChange={(e) => setWasher(e.target.value)} aria-label="Lavador asignado" className="rounded-2xl">
                 <option value="">Sin asignar</option>
                 {washers.data?.filter((w) => w.isActive).map((w) => <option key={w.id} value={w.id}>{w.fullName}</option>)}
               </Select>
             </div>
-
-            <div className="space-y-1 rounded-lg bg-muted p-3 text-sm">
-              {lines.map((l) => <div key={l.id} className="flex items-center justify-between gap-2"><span className="min-w-0 flex-1 truncate">{qty[l.id]} × {l.name}</span><PriceField price={Number(l.price)} base={l.base} cur={cur} canEdit={canPrice} onChange={(n) => setOv((o) => ({ ...o, [l.id]: n }))} onReset={() => setOv(({ [l.id]: _, ...r }) => r)} /><span className="w-20 text-right">{money(Number(l.price) * qty[l.id], cur)}</span></div>)}
-              <div className="flex justify-between border-t pt-1"><span>Subtotal</span><span>{money(subtotal, cur)}</span></div>
-              {!cashMode && (
-                <div className="flex items-center justify-between gap-3"><span>Descuento</span><Input type="number" min="0" step="0.01" placeholder="0.00" aria-label="Descuento" value={discount} onChange={(e) => setDiscount(e.target.value)} className="h-8 w-28 text-right" /></div>
-              )}
-              {cashMode && disc > 0 && <div className="flex justify-between"><span>Descuento</span><span>-{money(disc, cur)}</span></div>}
-              <div className="flex justify-between"><span>IVA ({taxRate}%)</span><span>{money(tax, cur)}</span></div>
-              <div className="flex justify-between text-base font-semibold"><span>Total</span><span>{money(total, cur)}</span></div>
+            <div>
+              <Label className="text-xs">Descuento</Label>
+              <Input type="number" min="0" step="0.01" inputMode="decimal" placeholder="0.00" aria-label="Descuento" value={discount} onChange={(e) => setDiscount(e.target.value)} className="rounded-2xl text-right" />
             </div>
+          </div>
+        </div>
+      </Group>
 
-            <ErrorText error={saveError ? new Error(saveError) : undefined} />
-            <Button size="lg" className="w-full" disabled={!validVehicle || saving}>
-              {saving ? 'Creando…' : method === 'LATER' ? 'Crear orden' : `Confirmar pago · ${money(total, cur)}`}
-            </Button>
-          </form>
+      <Group title="Cliente y observaciones" right={<button type="button" onClick={() => setShowClient(!showClient)} className="flex items-center gap-1 text-xs font-medium text-primary">{showClient ? 'Ocultar' : 'Agregar'}<ChevronDown className={cn('h-4 w-4 transition', showClient && 'rotate-180')} /></button>}>
+        {!showClient ? (
+          <button type="button" onClick={() => setShowClient(true)} className="w-full text-left text-sm text-muted-foreground">{c.name || c.phone ? [c.name, c.phone].filter(Boolean).join(' · ') : 'Opcional: nombre, teléfono para avisarle, notas'}</button>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2"><SelectedClientNote client={picked} onClear={() => setClientId(undefined)} /></div>
+            <div><Label className="text-xs">Nombre</Label><Input value={c.name} autoComplete="off" onChange={(e) => { setClientId(undefined); setC({ ...c, name: e.target.value }); }} className="rounded-2xl" /><ClientSuggest clients={clients} query={c.name} selectedId={clientId} onPick={pickClient} /></div>
+            <div><Label className="text-xs">Teléfono</Label><Input type="tel" inputMode="tel" autoComplete="off" value={c.phone} onChange={(e) => { setClientId(undefined); setC({ ...c, phone: e.target.value }); }} placeholder="10 dígitos" className="rounded-2xl" /><ClientSuggest clients={clients} query={c.phone} selectedId={clientId} onPick={pickClient} /></div>
+            <div><Label className="text-xs">Correo</Label><Input type="email" value={c.email} onChange={(e) => setC({ ...c, email: e.target.value })} className="rounded-2xl" /></div>
+            <div><Label className="text-xs">Avisarle por</Label>
+              <Select value={c.contactPreference} onChange={(e) => setC({ ...c, contactPreference: e.target.value })} className="rounded-2xl">
+                <option value="NONE">Ninguno</option><option value="WHATSAPP">WhatsApp</option><option value="EMAIL">Correo</option>
+              </Select>
+            </div>
+            <div className="sm:col-span-2"><Label className="text-xs">Observaciones</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Rayones, objetos de valor, etc." className="rounded-2xl" /></div>
+          </div>
+        )}
+      </Group>
+
+      <Group title="Resumen">
+        <div className="space-y-1.5 text-sm">
+          {lines.map((l) => <div key={l.id} className="flex items-center justify-between gap-2"><span className="min-w-0 flex-1 truncate">{qty[l.id]} × {l.name}</span><PriceField price={Number(l.price)} base={l.base} cur={cur} canEdit={canPrice} onChange={(n) => setOv((o) => ({ ...o, [l.id]: n }))} onReset={() => setOv(({ [l.id]: _, ...r }) => r)} /><span className="w-20 text-right tabular-nums">{money(Number(l.price) * qty[l.id], cur)}</span></div>)}
+          <div className="flex justify-between border-t border-black/5 pt-1.5 text-muted-foreground dark:border-white/10"><span>Subtotal</span><span className="tabular-nums">{money(subtotal, cur)}</span></div>
+          {disc > 0 && <div className="flex justify-between text-muted-foreground"><span>Descuento</span><span className="tabular-nums">-{money(disc, cur)}</span></div>}
+          <div className="flex justify-between text-muted-foreground"><span>IVA ({taxRate}%)</span><span className="tabular-nums">{money(tax, cur)}</span></div>
+        </div>
+      </Group>
+      <ErrorText error={saveError ? new Error(saveError) : undefined} />
+    </form>
   );
-
+  const checkoutFooter = (
+    <div className="space-y-2">
+      {!validVehicle && <p className="text-center text-xs text-muted-foreground">Falta: {missing.join(', ')}</p>}
+      <div className="flex items-center gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] text-muted-foreground">{count} {count === 1 ? 'servicio' : 'servicios'}</p>
+          <p className="text-xl font-bold tabular-nums">{money(total, cur)}</p>
+        </div>
+        <Button form="checkout-form" type="submit" size="lg" className="h-12 flex-1 rounded-2xl text-base" disabled={!validVehicle || saving}>
+          {saving ? 'Guardando…' : method === 'LATER' ? 'Crear orden' : 'Confirmar pago'}
+        </Button>
+      </div>
+    </div>
+  );
   return (
-    <div className={cashMode ? '' : '-mx-4 -mt-4 md:-mx-8 md:-mt-8'}>
+    <Root className={cashMode ? '' : 'px-0 pb-0 pt-0 md:px-0 md:pb-0 md:pt-0'}>
       <div className={cn('grid', cashMode ? 'lg:grid-cols-[1fr_380px]' : 'min-h-[calc(100vh-3.5rem)] md:min-h-screen')}>
         {/* Productos */}
-        <section className={cashMode ? 'p-4 pb-32 md:p-6 lg:pb-6' : 'p-4 pb-24 md:p-6'}>
+        <section className={cashMode ? 'min-w-0 pb-32 pt-1 lg:pb-6' : 'p-4 pb-24 md:p-6'}>
           <div className="mb-4 flex gap-2">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -415,7 +496,8 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
                 type="button"
                 onClick={() => (cashMode ? add(s.id) : pickAndPay(s.id))}
                 className={cn(
-                  'relative flex min-h-[110px] flex-col justify-between rounded-lg border bg-card p-3 text-left shadow-sm transition active:scale-[0.98] hover:border-primary',
+                  'relative flex min-h-[130px] flex-col rounded-lg border bg-card p-3 text-left shadow-sm transition active:scale-[0.98] hover:border-primary',
+                  'rounded-2xl border-white/60 bg-white/60 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.06]',
                   qty[s.id] > 0 && 'border-primary ring-1 ring-primary',
                 )}
               >
@@ -426,21 +508,16 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
                   <p className="pr-6 text-sm font-medium leading-tight">{s.name}</p>
                   {s.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{s.description}</p>}
                 </div>
-                <p className="mt-2 text-sm font-semibold">{money(s.price, cur)}</p>
+                <CarArt name={s.name} className="mt-2 h-10 w-14 shrink-0 rounded" />
+                <p className="mt-auto pt-2 text-sm font-semibold">{money(s.price, cur)}</p>
               </button>
             ))}
           </div>
-          {cashMode && count > 0 && (
-            <div className="mt-6 rounded-xl border bg-card">
-              <p className="border-b px-4 py-3 text-sm font-semibold">Datos de la venta y cobro</p>
-              {checkoutForm}
-            </div>
-          )}
         </section>
 
         {/* Resumen lateral: solo en la caja. En Nueva orden el servicio abre directo la ventana de pago */}
         {cashMode && (
-        <aside className="fixed inset-x-0 bottom-14 z-30 border-t bg-card lg:static lg:bottom-auto lg:flex lg:flex-col lg:border-l lg:border-t-0">
+        <aside className="fixed inset-x-0 bottom-14 z-30 border-t bg-card/80 backdrop-blur-xl lg:static lg:bottom-auto lg:flex lg:flex-col lg:border-l lg:border-t-0">
           <div className="hidden border-b px-4 py-3 text-sm font-semibold lg:block">Orden actual</div>
           <div className="hidden flex-1 space-y-2 overflow-y-auto p-4 lg:block">
             {lines.length === 0 && <p className="py-10 text-center text-sm text-muted-foreground">Toque un servicio para agregarlo</p>}
@@ -473,20 +550,15 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
               <span>Total <span className="text-xs font-normal text-muted-foreground lg:hidden">({count} serv.)</span></span>
               <span>{money(total, cur)}</span>
             </div>
-            <Button size="lg" className="w-full" disabled={count === 0 || saving} onClick={() => {
-              if (!cashMode) return setOpen(true);
-              const f = document.getElementById('checkout-form') as HTMLFormElement | null;
-              if (!f) return;
-              if (validVehicle) f.requestSubmit(); else f.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }}>{cashMode ? (validVehicle ? `Cobrar ${money(total, cur)}` : 'Cobrar') : 'Pagar'}</Button>
+            <Button size="lg" className="w-full" disabled={count === 0 || saving} onClick={() => setOpen(true)}>{cashMode ? 'Cobrar' : 'Pagar'}</Button>
           </div>
         </aside>
         )}
       </div>
 
       {/* Ventana de datos y pago (en la caja el formulario va en la misma pantalla) */}
-      {open && !cashMode && (
-        <Modal title={`Pagar · ${money(total, cur)}`} onClose={() => setOpen(false)}>
+      {open && (
+        <Modal title={`${cashMode ? 'Cobrar' : 'Pagar'} · ${money(total, cur)}`} onClose={() => setOpen(false)} footer={checkoutFooter}>
           {checkoutForm}
         </Modal>
       )}
@@ -518,6 +590,9 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
               <div className="text-center">
                 <p className="text-sm text-muted-foreground">Folio</p>
                 <p className="text-3xl font-semibold">{o?.folio ?? done.folio ?? 'Por asignar'}</p>
+              {done.tip && (done.tip.error
+                ? <p className="mx-auto mt-2 max-w-md rounded-md bg-amber-500/15 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">Propina de {money(done.tip.amount, cur)} sin registrar: {done.tip.error}</p>
+                : <p className="mx-auto mt-2 max-w-md rounded-md bg-emerald-500/10 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">Propina registrada: {money(done.tip.amount, cur)}</p>)}
                 {done.pending && <p className="mx-auto mt-2 max-w-md rounded-md bg-sky-500/10 px-3 py-2 text-xs text-sky-700 dark:text-sky-300">{online ? 'Sincronizando…' : 'Guardada en este dispositivo.'} El folio se asigna al sincronizar; el código y el QR ya son válidos.</p>}
                 <p className="mt-3 text-sm text-muted-foreground">Código de consulta</p>
                 <p className="font-mono text-3xl tracking-widest">{done.code}</p>
@@ -540,7 +615,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
           </Modal>
         );
       })()}
-    </div>
+    </Root>
   );
 }
 
