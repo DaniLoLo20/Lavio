@@ -17,6 +17,10 @@ import { AuthUser, CurrentUser, Perms, PermsAny, Roles } from '../../common/guar
 export const INCOME_CATEGORIES = ['SERVICE_SALE', 'PRODUCT_SALE', 'EXTRA_INCOME', 'ADJUSTMENT'] as const;
 export const EXPENSE_CATEGORIES = ['PURCHASE', 'STATIONERY', 'OPERATING', 'PAYROLL', 'MAINTENANCE', 'OTHER'] as const;
 
+/** Propinas: dinero de terceros que pasa por la caja. No cuentan como venta ni como gasto, pero si como efectivo en el cajon. */
+export const TIP_IN = 'TIP';
+export const TIP_OUT = 'TIP_PAYOUT';
+
 const UPLOAD_DIR = () => process.env.UPLOAD_DIR || '/storage/uploads';
 const EXT: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/heic': '.heic' };
 const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -35,6 +39,23 @@ class MovementDto {
   @IsOptional() @IsEnum(PaymentMethod) method?: PaymentMethod;
   @IsOptional() @IsUUID() responsibleId?: string;
   @IsOptional() @IsString() @MaxLength(120) responsibleName?: string;
+}
+
+class TipDto {
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) amount: number;
+  @IsOptional() @IsEnum(PaymentMethod) method?: PaymentMethod;
+  /** A quien pertenece la propina (si no se indica y hay orden, el lavador asignado) */
+  @IsOptional() @IsUUID() washerId?: string;
+  @IsOptional() @IsUUID() orderId?: string;
+  @IsOptional() @IsString() @MaxLength(120) note?: string;
+}
+
+class TipPayoutDto {
+  /** Persona a la que se le paga; sin valor = propina general (sin asignar) */
+  @IsOptional() @IsUUID() washerId?: string;
+  /** Si no se indica, se paga todo lo pendiente de esa persona */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) amount?: number;
+  @IsOptional() @IsEnum(PaymentMethod) method?: PaymentMethod;
 }
 
 class CloseCashDto {
@@ -59,6 +80,8 @@ export interface CashSummary {
   totalExpense: number;
   /** efectivo que deberia haber en el cajon */
   expectedCash: number;
+  /** propinas del turno (no incluidas en ingresos/egresos, si en el efectivo esperado) */
+  tips?: { collected: number; paidOut: number; cashCollected: number; cashPaidOut: number };
 }
 
 @Injectable()
@@ -72,12 +95,14 @@ export class CashService {
       this.prisma.payment.groupBy({ by: ['method'], where: { tenantId, deletedAt: null, paidAt: { gte: s.openedAt, lte: end } }, _sum: { amount: true }, _count: true }),
       this.prisma.cashMovement.groupBy({ by: ['type', 'method', 'category'], where: { sessionId: s.id, deletedAt: null }, _sum: { amount: true } }),
     ]);
-    const orders = byMethod(), manual = byMethod(), exp = byMethod();
+    const orders = byMethod(), manual = byMethod(), exp = byMethod(), tipIn = byMethod(), tipOut = byMethod();
     const incomeByCategory: Record<string, number> = {}, expenseByCategory: Record<string, number> = {};
     let count = 0;
     for (const p of pay) { orders[p.method] += num(p._sum.amount); count += p._count; }
     for (const m of mov) {
       const a = num(m._sum.amount);
+      if (m.category === TIP_IN) { tipIn[m.method] += a; continue; }
+      if (m.category === TIP_OUT) { tipOut[m.method] += a; continue; }
       if (m.type === 'INCOME') { manual[m.method] += a; incomeByCategory[m.category] = r2((incomeByCategory[m.category] ?? 0) + a); }
       else { exp[m.method] += a; expenseByCategory[m.category] = r2((expenseByCategory[m.category] ?? 0) + a); }
     }
@@ -92,7 +117,8 @@ export class CashService {
       incomeByCategory, expenseByCategory,
       totalIncome: r2(ordersTotal + manualTotal),
       totalExpense: expTotal,
-      expectedCash: r2(opening + orders.CASH + manual.CASH - exp.CASH),
+      expectedCash: r2(opening + orders.CASH + manual.CASH - exp.CASH + tipIn.CASH - tipOut.CASH),
+      tips: { collected: sumMethods(tipIn), paidOut: sumMethods(tipOut), cashCollected: r2(tipIn.CASH), cashPaidOut: r2(tipOut.CASH) },
     };
   }
 
@@ -255,6 +281,86 @@ export class CashService {
     return { ok: true };
   }
 
+  // ---------------------------------------------------------------- Propinas
+  private async openSession(tenantId: string) {
+    const s = await this.prisma.cashSession.findFirst({ where: { tenantId, status: 'OPEN' } });
+    if (!s) throw new BadRequestException('Abra la caja antes de registrar propinas');
+    return s;
+  }
+
+  /** Saldo de propinas por persona (todas las cajas): recibidas, pagadas y pendientes por entregar. */
+  async tipsBalance(tenantId: string) {
+    const rows = await this.prisma.cashMovement.groupBy({
+      by: ['responsibleId', 'responsibleName', 'category'],
+      where: { tenantId, deletedAt: null, category: { in: [TIP_IN, TIP_OUT] } },
+      _sum: { amount: true },
+    });
+    const map = new Map<string, { washerId: string | null; name: string; collected: number; paidOut: number }>();
+    for (const r of rows) {
+      const key = r.responsibleId ?? 'general';
+      const e = map.get(key) ?? { washerId: r.responsibleId, name: r.responsibleId ? r.responsibleName : 'Propina general (sin asignar)', collected: 0, paidOut: 0 };
+      if (r.category === TIP_IN) e.collected += num(r._sum.amount); else e.paidOut += num(r._sum.amount);
+      map.set(key, e);
+    }
+    const people = [...map.values()].map((e) => ({ ...e, collected: r2(e.collected), paidOut: r2(e.paidOut), pending: r2(e.collected - e.paidOut) })).sort((a, b) => b.pending - a.pending);
+    const recent = await this.prisma.cashMovement.findMany({
+      where: { tenantId, deletedAt: null, category: { in: [TIP_IN, TIP_OUT] } },
+      orderBy: { occurredAt: 'desc' }, take: 30,
+    });
+    return {
+      people,
+      totals: {
+        collected: r2(people.reduce((s, p) => s + p.collected, 0)),
+        paidOut: r2(people.reduce((s, p) => s + p.paidOut, 0)),
+        pending: r2(people.reduce((s, p) => s + p.pending, 0)),
+      },
+      recent: recent.map((m) => this.movementView(m)),
+    };
+  }
+
+  /** Registra una propina recibida (en efectivo, tarjeta o transferencia). Liga a la orden si se indica. */
+  async addTip(u: AuthUser, dto: TipDto) {
+    const s = await this.openSession(u.tenantId);
+    let washerId = dto.washerId;
+    let concept = 'Propina';
+    if (dto.orderId) {
+      const o = await this.prisma.washOrder.findFirst({ where: { id: dto.orderId, tenantId: u.tenantId, deletedAt: null }, include: { vehicle: { select: { plate: true } } } });
+      if (!o) throw new BadRequestException('Orden inválida');
+      concept = `Propina · ${o.folio} · ${o.vehicle.plate}`;
+      washerId = washerId ?? o.assignedToId ?? undefined;
+    } else if (dto.note?.trim()) concept = `Propina · ${dto.note.trim()}`;
+    let responsibleName = 'Propina general';
+    if (washerId) {
+      const w = await this.prisma.user.findFirst({ where: { id: washerId, tenantId: u.tenantId, deletedAt: null } });
+      if (!w) throw new BadRequestException('Persona inválida');
+      responsibleName = w.fullName;
+    }
+    const m = await this.prisma.cashMovement.create({
+      data: {
+        tenantId: u.tenantId, sessionId: s.id, type: 'INCOME', category: TIP_IN, concept, amount: dto.amount,
+        method: dto.method ?? 'CASH', responsibleId: washerId ?? null, responsibleName, createdById: u.sub,
+      },
+    });
+    return this.movementView(m);
+  }
+
+  /** Entrega las propinas pendientes de una persona: sale de la caja como «Pago de propinas». */
+  async payoutTips(u: AuthUser, dto: TipPayoutDto) {
+    const s = await this.openSession(u.tenantId);
+    const bal = await this.tipsBalance(u.tenantId);
+    const person = bal.people.find((p) => (p.washerId ?? null) === (dto.washerId ?? null));
+    if (!person || person.pending <= 0.004) throw new BadRequestException('No hay propinas pendientes para esta persona');
+    const amount = dto.amount ?? person.pending;
+    if (amount > person.pending + 0.005) throw new BadRequestException(`Solo hay ${person.pending.toFixed(2)} pendientes de entregar`);
+    const m = await this.prisma.cashMovement.create({
+      data: {
+        tenantId: u.tenantId, sessionId: s.id, type: 'EXPENSE', category: TIP_OUT, concept: `Pago de propinas · ${person.name}`, amount,
+        method: dto.method ?? 'CASH', responsibleId: dto.washerId ?? null, responsibleName: person.name, createdById: u.sub,
+      },
+    });
+    return this.movementView(m);
+  }
+
   /** Corte: caja inicial, ingresos, egresos, caja esperada (efectivo), caja real y diferencia. Guarda una foto fija. */
   async close(u: AuthUser, id: string, dto: CloseCashDto) {
     const s = await this.prisma.cashSession.findFirst({ where: { id, tenantId: u.tenantId } });
@@ -289,6 +395,10 @@ export class CashController {
   @Perms('cash:view') @Get('sessions') list(@CurrentUser() u: AuthUser, @Query('from') from?: string, @Query('to') to?: string) { return this.svc.list(u.tenantId, from, to); }
   @Perms('cash:view') @Get('sessions/:id') detail(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) { return this.svc.detail(u.tenantId, id); }
   @Perms('cash:close') @Post('sessions/:id/close') close(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CloseCashDto) { return this.svc.close(u, id, dto); }
+
+  @PermsAny('cash:view', 'cash:tips') @Get('tips') tips(@CurrentUser() u: AuthUser) { return this.svc.tipsBalance(u.tenantId); }
+  @Perms('cash:tips') @Post('tips') addTip(@CurrentUser() u: AuthUser, @Body() dto: TipDto) { return this.svc.addTip(u, dto); }
+  @Perms('cash:tips') @Post('tips/payout') payout(@CurrentUser() u: AuthUser, @Body() dto: TipPayoutDto) { return this.svc.payoutTips(u, dto); }
 
   @Perms('cash:create') @Post('movements') add(@CurrentUser() u: AuthUser, @Body() dto: MovementDto) { return this.svc.addMovement(u, dto); }
   @Perms('cash:delete') @Delete('movements/:id') remove(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) { return this.svc.removeMovement(u, id); }

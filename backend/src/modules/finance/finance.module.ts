@@ -32,7 +32,8 @@ export class FinanceService {
     const [pays, movs, open] = await Promise.all([
       this.prisma.payment.findMany({ where: { tenantId: t, deletedAt: null, paidAt: { gte: fetchFrom, lt: tomorrow } }, select: { paidAt: true, amount: true, method: true } }),
       this.prisma.cashMovement.findMany({
-        where: { tenantId: t, deletedAt: null, occurredAt: { gte: fetchFrom, lt: tomorrow } },
+        // las propinas no son venta ni gasto del negocio: son dinero de terceros que pasa por la caja
+        where: { tenantId: t, deletedAt: null, category: { notIn: ['TIP', 'TIP_PAYOUT'] }, occurredAt: { gte: fetchFrom, lt: tomorrow } },
         select: { occurredAt: true, type: true, category: true, amount: true, method: true, concept: true, responsibleName: true },
       }),
       this.prisma.cashSession.findFirst({ where: { tenantId: t, status: 'OPEN' } }),

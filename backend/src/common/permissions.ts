@@ -23,7 +23,7 @@ export const CATALOG: PermResource[] = [
     ],
   },
   { resource: 'washer', label: 'Vista de trabajo (lavadores)', actions: [A('view', 'Ver')] },
-  { resource: 'cash', label: 'Caja', actions: [A('view', 'Ver'), A('create', 'Abrir caja y registrar movimientos'), A('delete', 'Eliminar movimientos'), A('close', 'Hacer corte'), A('export', 'Exportar (CSV)')] },
+  { resource: 'cash', label: 'Caja', actions: [A('view', 'Ver'), A('create', 'Abrir caja y registrar movimientos'), A('delete', 'Eliminar movimientos'), A('close', 'Hacer corte'), A('tips', 'Registrar y pagar propinas'), A('export', 'Exportar (CSV)')] },
   { resource: 'finance', label: 'Finanzas', actions: [A('view', 'Ver'), A('export', 'Exportar (CSV)')] },
   { resource: 'services', label: 'Servicios', actions: CRUD() },
   { resource: 'clients', label: 'Clientes', actions: CRUD() },
