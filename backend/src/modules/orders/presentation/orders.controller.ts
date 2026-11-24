@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { diskStorage } from 'multer';
@@ -7,7 +7,7 @@ import { mkdirSync, promises as fsp } from 'fs';
 import { join } from 'path';
 import { AuthUser, CurrentUser, Perms } from '../../../common/guards';
 import { OrdersService } from '../application/orders.service';
-import { ArchiveDto, AssignDto, ChangeStatusDto, CreateOrderDto, ItemPriceDto, PaymentDto } from './dto';
+import { ArchiveDto, AssignDto, DeleteOrdersDto, ChangeStatusDto, CreateOrderDto, ItemPriceDto, PaymentDto } from './dto';
 
 const UPLOAD_DIR = () => process.env.UPLOAD_DIR || '/storage/uploads';
 const EXT: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/heic': '.heic' };
@@ -22,6 +22,12 @@ export class OrdersController {
 
   @Perms('orders:create') @Post()
   create(@CurrentUser() u: AuthUser, @Body() dto: CreateOrderDto) { return this.svc.create(u, dto); }
+
+  @Perms('orders:delete') @Post('delete')
+  removeMany(@CurrentUser() u: AuthUser, @Body() dto: DeleteOrdersDto) { return this.svc.remove(u, dto.ids.slice(0, 200)); }
+
+  @Perms('orders:delete') @Delete(':id')
+  removeOne(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string) { return this.svc.remove(u, [id]); }
 
   @Perms('orders:archive') @Post('archive')
   archive(@CurrentUser() u: AuthUser, @Body() dto: ArchiveDto) { return this.svc.archive(u, dto.ids.slice(0, 200), dto.archived); }

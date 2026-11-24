@@ -22,6 +22,7 @@ import { TenantModule } from './modules/tenant/tenant.module';
 import { CashModule } from './modules/cash/cash.module';
 import { FinanceModule } from './modules/finance/finance.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { MenuModule } from './modules/menu/menu.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { RolesModule } from './modules/roles/roles.module';
     CashModule,
     FinanceModule,
     RolesModule,
+    MenuModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

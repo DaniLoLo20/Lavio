@@ -177,6 +177,14 @@ export class OrdersService {
     return this.get(user, id);
   }
 
+  /** Elimina órdenes (lógico, junto con sus cobros). Requiere orders:delete; respeta «solo las asignadas». */
+  async remove(user: AuthUser, ids: string[]) {
+    const unique = [...new Set(ids)];
+    for (const id of unique) await this.load(user, id);
+    const count = await this.repo.softDelete(user.tenantId, unique, user.sub);
+    return { count };
+  }
+
   /** Archiva (o desarchiva) ordenes. Solo se archivan las finalizadas y pagadas: las pendientes de cobro siguen visibles. */
   async archive(user: AuthUser, ids: string[], archived: boolean) {
     const unique = [...new Set(ids)];

@@ -65,3 +65,7 @@ export class ArchiveDto {
   @IsArray() @ArrayMinSize(1) @IsUUID('all', { each: true }) ids: string[];
   @IsBoolean() archived: boolean;
 }
+
+export class DeleteOrdersDto {
+  @IsArray() @ArrayMinSize(1) @IsUUID('all', { each: true }) ids: string[];
+}

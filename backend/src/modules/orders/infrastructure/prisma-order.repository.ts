@@ -196,6 +196,19 @@ export class PrismaOrderRepository extends WashOrderRepository {
     });
   }
 
+  /** Eliminación lógica: la orden y sus cobros quedan con fecha de borrado (se conservan en la base, pero ya no cuentan en ningún lado). */
+  async softDelete(tenantId: string, ids: string[], userId: string) {
+    const now = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const own = await tx.washOrder.findMany({ where: { tenantId, id: { in: ids }, deletedAt: null }, select: { id: true } });
+      const valid = own.map((o) => o.id);
+      if (!valid.length) return 0;
+      await tx.payment.updateMany({ where: { tenantId, orderId: { in: valid }, deletedAt: null }, data: { deletedAt: now } });
+      const r = await tx.washOrder.updateMany({ where: { tenantId, id: { in: valid }, deletedAt: null }, data: { deletedAt: now, updatedById: userId } });
+      return r.count;
+    });
+  }
+
   async setArchived(tenantId: string, ids: string[], archived: boolean, userId: string) {
     const r = await this.prisma.washOrder.updateMany({ where: { tenantId, id: { in: ids }, deletedAt: null }, data: { archivedAt: archived ? new Date() : null, updatedById: userId } });
     return r.count;
