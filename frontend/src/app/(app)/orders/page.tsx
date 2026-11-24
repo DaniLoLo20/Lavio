@@ -11,7 +11,7 @@ import { useOnline } from '@/lib/net';
 import { useLocalOrders, usePendingOps } from '@/lib/offline/hooks';
 import { mergeOrderList } from '@/lib/offline/merge';
 import { changeStatusOffline } from '@/lib/offline/sync';
-import { METHODS, STATUS, STATUS_ORDER, cn, dateTime, money } from '@/lib/utils';
+import { METHODS, STATUS, STATUS_ORDER, cn, dateTime, money, hasVehicle, plateOf, vehicleName } from '@/lib/utils';
 import { Modal } from '@/components/modal';
 import { Button, Card, Empty, ErrorText, Input, PageHeader, Select, StatusBadge } from '@/components/ui';
 import { DownloadButton } from '@/components/download-button';
@@ -231,11 +231,11 @@ export default function OrdersPage() {
             return (
               <div key={o.id} className={cn('px-4 py-3', sel.has(o.id) && 'bg-primary/5')}>
                 <div className="flex items-start gap-3">
-                  <input type="checkbox" aria-label={`Seleccionar ${o.folio ?? o.vehicle.plate}`} checked={sel.has(o.id)} onChange={() => toggle(o.id)} className="mt-1 h-5 w-5 shrink-0" />
+                  <input type="checkbox" aria-label={`Seleccionar ${o.folio ?? plateOf(o)}`} checked={sel.has(o.id)} onChange={() => toggle(o.id)} className="mt-1 h-5 w-5 shrink-0" />
                   <Link href={`/orders/detail?id=${o.id}`} className="min-w-0 flex-1">
                     <p className="flex items-center gap-2 truncate text-sm">
-                      <span className="font-mono text-base font-bold">{o.vehicle.plate}</span>
-                      <span className="truncate">{o.vehicle.brand} {o.vehicle.model}</span>
+                      {hasVehicle(o) && <span className="font-mono text-base font-bold">{o.vehicle.plate}</span>}
+                      <span className={cn('truncate', !hasVehicle(o) && 'font-semibold')}>{vehicleName(o)}</span>
                       {o.pending && <CloudOff className="h-3.5 w-3.5 shrink-0 text-sky-600" aria-label="Pendiente de sincronizar" />}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">{o.folio ?? 'Folio por asignar'} · {o.client?.name ?? 'Sin cliente'} · {dateTime(o.receivedAt)}</p>
@@ -254,7 +254,7 @@ export default function OrdersPage() {
                   {canStatus && !isDone(o) && <Button size="sm" variant="outline" className="rounded-full bg-white/60 px-4" disabled={busy} onClick={() => void finalize([o])}>Finalizar</Button>}
                   {canArchive && view !== 'archived' && archivable(o) && <Button size="sm" variant="ghost" className="rounded-full" disabled={busy || !online} onClick={() => void archive([o], true)}><Archive className="h-3.5 w-3.5" />Archivar</Button>}
                   {canArchive && view === 'archived' && <Button size="sm" variant="ghost" className="rounded-full" disabled={busy || !online} onClick={() => void archive([o], false)}><ArchiveRestore className="h-3.5 w-3.5" />Desarchivar</Button>}
-                  {canDelete && <button type="button" aria-label={`Eliminar ${o.folio ?? o.vehicle.plate}`} disabled={busy || (!online && synced(o))} onClick={() => void removeOrders([o])} className="ml-auto grid h-8 w-8 place-items-center rounded-full text-muted-foreground transition hover:bg-red-500/10 hover:text-red-600 active:scale-90 disabled:opacity-30"><Trash2 className="h-4 w-4" /></button>}
+                  {canDelete && <button type="button" aria-label={`Eliminar ${o.folio ?? plateOf(o)}`} disabled={busy || (!online && synced(o))} onClick={() => void removeOrders([o])} className="ml-auto grid h-8 w-8 place-items-center rounded-full text-muted-foreground transition hover:bg-red-500/10 hover:text-red-600 active:scale-90 disabled:opacity-30"><Trash2 className="h-4 w-4" /></button>}
                 </div>
               </div>
             );
@@ -298,7 +298,7 @@ function CollectModal({ orders, cur, onClose }: { orders: any[]; cur?: string; o
         <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg bg-muted p-3 text-sm">
           {orders.map((o) => (
             <div key={o.id} className="flex items-center justify-between gap-2">
-              <span className="truncate">{o.folio} · {o.vehicle.plate} · {o.client?.name ?? 'Sin cliente'}</span>
+              <span className="truncate">{o.folio} · {hasVehicle(o) ? o.vehicle.plate : 'Venta'} · {o.client?.name ?? 'Sin cliente'}</span>
               <span className="shrink-0 font-medium">
                 {state[o.id] === 'ok' ? <span className="text-emerald-600">Cobrada</span> : state[o.id] ? <span className="text-red-600" title={state[o.id]}>Error</span> : money(balanceOf(o), cur)}
               </span>
@@ -346,7 +346,7 @@ function NotifyModal({ orders, onClose }: { orders: any[]; onClose: () => void }
             const n = info.data?.[o.id];
             return (
               <div key={o.id} className="flex items-center justify-between gap-2 p-3 text-sm">
-                <span className="min-w-0 truncate">{n?.clientName ?? o.client?.name ?? 'Sin nombre'} · <span className="font-mono">{o.vehicle.plate}</span></span>
+                <span className="min-w-0 truncate">{n?.clientName ?? o.client?.name ?? 'Sin nombre'} · <span className="font-mono">{plateOf(o)}</span></span>
                 {!info.isLoading && !link(o) ? <span className="shrink-0 text-xs text-amber-600">Sin teléfono ni correo</span>
                   : sent.has(o.id) ? <span className="shrink-0 text-xs text-emerald-600">Avisado</span>
                   : link(o) && <a className="shrink-0 rounded-md border px-3 py-1 text-xs hover:bg-muted" href={link(o)!} target="_blank" rel="noreferrer" onClick={() => mark(o.id)}>{n?.whatsapp ? 'WhatsApp' : 'Correo'}</a>}

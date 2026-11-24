@@ -18,7 +18,7 @@ import { Combobox } from '@/components/combobox';
 import { VoiceFab, VoiceMode, type VoiceDraft } from '@/components/voice-mode';
 import { ClientSuggest, SelectedClientNote } from '@/components/client-suggest';
 import { TipField, sendTip } from '@/components/tips';
-import { CarArt } from '@/components/car-art';
+import { CarArt, ProductArt } from '@/components/car-art';
 import { GlassPage } from '@/components/glass';
 import { Portal } from '@/components/portal';
 import { findByPlate, useClientIndex, type ClientLite } from '@/lib/clients';
@@ -126,7 +126,8 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
    * Lo usan el formulario normal y el Modo Voz.
    */
   async function persist(p: {
-    vehicle: { plate: string; brand: string; model: string; color: string };
+    /** null = venta sin vehículo */
+    vehicle: { plate: string; brand: string; model: string; color: string } | null;
     client: { id?: string; name?: string; phone?: string; email?: string; contactPreference?: string };
     notes?: string;
     items: { id: string; qty: number }[];
@@ -137,7 +138,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
   }, opts: { silent?: boolean } = {}) {
     const washerName = washers.data?.find((w) => w.id === p.washerId)?.fullName;
     const { id, code, opId } = await createOrderOffline({
-      vehicle: { ...p.vehicle, plate: p.vehicle.plate.trim() },
+      vehicle: p.vehicle ? { ...p.vehicle, plate: p.vehicle.plate.trim() } : null,
       client: p.client,
       notes: p.notes || undefined,
       items: p.items.map((i) => { const s = all.find((x) => x.id === i.id)!; const price = ov[s.id] !== undefined ? ov[s.id] : Number(s.price); return { serviceId: s.id, name: s.name, price, quantity: i.qty, priceEdited: price !== Number(s.price) }; }),
@@ -182,7 +183,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
     setSaveError('');
     try {
       await persist({
-        vehicle: v,
+        vehicle: needVehicle ? v : null,
         client: { id: clientId, name: c.name || undefined, phone: c.phone || undefined, email: c.email || undefined, contactPreference: c.contactPreference },
         notes,
         items: lines.map((l) => ({ id: l.id, qty: qty[l.id] })),
@@ -201,7 +202,8 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
   // ----- Modo Voz -----
   async function saveVoice(d: VoiceDraft, o?: { silent?: boolean }) {
     await persist({
-      vehicle: { plate: d.plate, brand: d.brand, model: d.model, color: d.color },
+      // sin placa y con servicios que no la piden = venta sin vehículo
+      vehicle: d.plate.trim() || Object.keys(d.items).some((id) => all.find((s) => s.id === id)?.requiresVehicle !== false) ? { plate: d.plate, brand: d.brand, model: d.model, color: d.color } : null,
       client: { id: d.clientId, name: d.name || undefined, phone: d.phone || undefined, contactPreference: d.phone ? 'WHATSAPP' : 'NONE' },
       notes: d.notes,
       items: Object.entries(d.items).filter(([, q]) => q > 0).map(([id, q]) => ({ id, qty: q })),
@@ -315,17 +317,39 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
     setV((p) => ({ ...p, brand: text, model: resolveBrand(text) === resolveBrand(p.brand) ? p.model : '' }));
   const COLORS = ['Blanco', 'Negro', 'Gris', 'Plata', 'Rojo', 'Azul', 'Verde', 'Amarillo', 'Naranja', 'Café', 'Beige', 'Dorado', 'Vino', 'Morado'];
 
-  const validVehicle = v.plate.trim().length >= 3 && v.brand.trim() && v.model.trim() && v.color.trim();
+  /** ¿Algún servicio elegido pide vehículo? Si ninguno (productos, lavado de tapetes…), se vende solo con nombre y teléfono. */
+  const needVehicle = lines.length === 0 || lines.some((l) => l.requiresVehicle !== false);
+  const validVehicle = !needVehicle || !!(v.plate.trim().length >= 3 && v.brand.trim() && v.model.trim() && v.color.trim());
 
   const Root: any = cashMode ? 'div' : GlassPage;
-  const missing = [v.plate.trim().length < 3 && 'placa', !v.brand.trim() && 'marca', !v.model.trim() && 'modelo', !v.color.trim() && 'color'].filter(Boolean) as string[];
+  const missing = !needVehicle ? [] : [v.plate.trim().length < 3 && 'placa', !v.brand.trim() && 'marca', !v.model.trim() && 'modelo', !v.color.trim() && 'color'].filter(Boolean) as string[];
+  const clientGroup = (
+      <Group title={needVehicle ? 'Cliente y observaciones' : 'Cliente'} right={!needVehicle ? <span className="text-[11px] font-medium text-violet-600">Venta sin vehículo</span> : <button type="button" onClick={() => setShowClient(!showClient)} className="flex items-center gap-1 text-xs font-medium text-primary">{showClient ? 'Ocultar' : 'Agregar'}<ChevronDown className={cn('h-4 w-4 transition', showClient && 'rotate-180')} /></button>}>
+        {!showClient && needVehicle ? (
+          <button type="button" onClick={() => setShowClient(true)} className="w-full text-left text-sm text-muted-foreground">{c.name || c.phone ? [c.name, c.phone].filter(Boolean).join(' · ') : 'Opcional: nombre, teléfono para avisarle, notas'}</button>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2"><SelectedClientNote client={picked} onClear={() => setClientId(undefined)} /></div>
+            <div><Label className="text-xs">Nombre</Label><Input value={c.name} autoComplete="off" onChange={(e) => { setClientId(undefined); setC({ ...c, name: e.target.value }); }} className="rounded-2xl" /><ClientSuggest clients={clients} query={c.name} selectedId={clientId} onPick={pickClient} /></div>
+            <div><Label className="text-xs">Teléfono</Label><Input type="tel" inputMode="tel" autoComplete="off" value={c.phone} onChange={(e) => { setClientId(undefined); setC({ ...c, phone: e.target.value }); }} placeholder="10 dígitos" className="rounded-2xl" /><ClientSuggest clients={clients} query={c.phone} selectedId={clientId} onPick={pickClient} /></div>
+            <div><Label className="text-xs">Correo</Label><Input type="email" value={c.email} onChange={(e) => setC({ ...c, email: e.target.value })} className="rounded-2xl" /></div>
+            <div><Label className="text-xs">Avisarle por</Label>
+              <Select value={c.contactPreference} onChange={(e) => setC({ ...c, contactPreference: e.target.value })} className="rounded-2xl">
+                <option value="NONE">Ninguno</option><option value="WHATSAPP">WhatsApp</option><option value="EMAIL">Correo</option>
+              </Select>
+            </div>
+            <div className="sm:col-span-2"><Label className="text-xs">Observaciones</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Rayones, objetos de valor, etc." className="rounded-2xl" /></div>
+          </div>
+        )}
+      </Group>
+  );
   const checkoutForm = (
     <form id="checkout-form" className="space-y-4 p-4" onSubmit={(e) => { e.preventDefault(); if (validVehicle) void submitOrder(); }}>
       <Group title="Servicios">
         <div className="divide-y divide-black/5 dark:divide-white/10">
           {lines.map((l) => (
             <div key={l.id} className="flex items-center gap-3 py-2 first:pt-0 last:pb-0">
-              <CarArt name={l.name} className="h-11 w-14 shrink-0 rounded-xl" />
+              {l.requiresVehicle === false ? <ProductArt name={l.name} className="h-11 w-14 shrink-0 rounded-xl" /> : <CarArt name={l.name} className="h-11 w-14 shrink-0 rounded-xl" />}
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{l.name}</p>
                 <p className="truncate text-xs text-muted-foreground">{l.description || 'Sin descripción'}</p>
@@ -349,6 +373,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
         )}
       </Group>
 
+      {needVehicle && (
       <Group title="Vehículo" right={picked ? <span className="text-[11px] font-medium text-emerald-600">Cliente registrado</span> : undefined}>
         <div className="space-y-3">
           <button type="button" onClick={() => fileRef.current?.click()} disabled={ocrBusy} aria-label="Tomar foto trasera"
@@ -403,6 +428,9 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
           </div>
         </div>
       </Group>
+      )}
+
+      {!needVehicle && clientGroup}
 
       <Group title="Cobro">
         <div className="space-y-3">
@@ -431,24 +459,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
         </div>
       </Group>
 
-      <Group title="Cliente y observaciones" right={<button type="button" onClick={() => setShowClient(!showClient)} className="flex items-center gap-1 text-xs font-medium text-primary">{showClient ? 'Ocultar' : 'Agregar'}<ChevronDown className={cn('h-4 w-4 transition', showClient && 'rotate-180')} /></button>}>
-        {!showClient ? (
-          <button type="button" onClick={() => setShowClient(true)} className="w-full text-left text-sm text-muted-foreground">{c.name || c.phone ? [c.name, c.phone].filter(Boolean).join(' · ') : 'Opcional: nombre, teléfono para avisarle, notas'}</button>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2"><SelectedClientNote client={picked} onClear={() => setClientId(undefined)} /></div>
-            <div><Label className="text-xs">Nombre</Label><Input value={c.name} autoComplete="off" onChange={(e) => { setClientId(undefined); setC({ ...c, name: e.target.value }); }} className="rounded-2xl" /><ClientSuggest clients={clients} query={c.name} selectedId={clientId} onPick={pickClient} /></div>
-            <div><Label className="text-xs">Teléfono</Label><Input type="tel" inputMode="tel" autoComplete="off" value={c.phone} onChange={(e) => { setClientId(undefined); setC({ ...c, phone: e.target.value }); }} placeholder="10 dígitos" className="rounded-2xl" /><ClientSuggest clients={clients} query={c.phone} selectedId={clientId} onPick={pickClient} /></div>
-            <div><Label className="text-xs">Correo</Label><Input type="email" value={c.email} onChange={(e) => setC({ ...c, email: e.target.value })} className="rounded-2xl" /></div>
-            <div><Label className="text-xs">Avisarle por</Label>
-              <Select value={c.contactPreference} onChange={(e) => setC({ ...c, contactPreference: e.target.value })} className="rounded-2xl">
-                <option value="NONE">Ninguno</option><option value="WHATSAPP">WhatsApp</option><option value="EMAIL">Correo</option>
-              </Select>
-            </div>
-            <div className="sm:col-span-2"><Label className="text-xs">Observaciones</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Rayones, objetos de valor, etc." className="rounded-2xl" /></div>
-          </div>
-        )}
-      </Group>
+      {needVehicle && clientGroup}
 
       <Group title="Resumen">
         <div className="space-y-1.5 text-sm">
@@ -508,7 +519,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
                   <p className="pr-6 text-sm font-medium leading-tight">{s.name}</p>
                   {s.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{s.description}</p>}
                 </div>
-                <CarArt name={s.name} className="mt-2 h-10 w-14 shrink-0 rounded" />
+                {s.requiresVehicle === false ? <ProductArt name={s.name} className="mt-2 h-10 w-14 shrink-0 rounded" /> : <CarArt name={s.name} className="mt-2 h-10 w-14 shrink-0 rounded" />}
                 <p className="mt-auto pt-2 text-sm font-semibold">{money(s.price, cur)}</p>
               </button>
             ))}

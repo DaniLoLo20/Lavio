@@ -9,7 +9,7 @@ import { useAuth } from '@/lib/auth';
 import { useOnline } from '@/lib/net';
 import { useLocalOrders } from '@/lib/offline/hooks';
 import { EXPENSE_CATS, INCOME_CATS } from '@/lib/cash';
-import { METHODS, STATUS, cn, dateTime, money, type Status } from '@/lib/utils';
+import { METHODS, STATUS, cn, dateTime, money, type Status, hasVehicle, vehicleName } from '@/lib/utils';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Empty, ErrorText, Input, Label, PageHeader, Select, Textarea } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { MovementsTable } from '@/components/cash-movements';
@@ -105,7 +105,7 @@ function CollectModal({ order, cur, onClose, onDone }: { order: any; cur?: strin
     <Modal title={`Cobrar ${order.folio}`} onClose={onClose}>
       <form className="space-y-4 p-4" onSubmit={(e) => { e.preventDefault(); setTipErr(null); pay.mutate(); }}>
         <div className="rounded-2xl bg-black/[0.04] p-3 text-sm dark:bg-white/5">
-          <p className="font-medium">{order.vehicle.brand} {order.vehicle.model} · <span className="font-mono">{order.vehicle.plate}</span>{order.clientName && ` · ${order.clientName}`}</p>
+          <p className="font-medium">{vehicleName(order)}{hasVehicle(order) && <> · <span className="font-mono">{order.vehicle.plate}</span></>}{order.clientName && ` · ${order.clientName}`}</p>
           <Row label="Total" value={money(order.total, cur)} />
           <Row label="Pagado" value={money(order.paid, cur)} />
           <Row bold label="Saldo" value={money(order.due, cur)} />
@@ -330,7 +330,7 @@ export default function CashPage() {
                 {receivables.data?.length === 0 ? <Empty text="No hay cuentas por cobrar" /> : receivables.data?.map((o) => (
                   <div key={o.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
                     <div className="min-w-0">
-                      <p className="font-medium">{o.folio} · {o.vehicle.brand} {o.vehicle.model} <span className="font-mono text-muted-foreground">{o.vehicle.plate}</span></p>
+                      <p className="font-medium">{o.folio} · {vehicleName(o)} <span className="font-mono text-muted-foreground">{hasVehicle(o) ? o.vehicle.plate : ''}</span></p>
                       <p className="text-xs text-muted-foreground">{o.clientName ?? 'Sin cliente'} · {dateTime(o.receivedAt)} · <span className={cn('rounded px-1.5', STATUS[o.status as Status].cls)}>{STATUS[o.status as Status].label}</span></p>
                     </div>
                     <div className="flex items-center gap-3">

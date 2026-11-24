@@ -15,7 +15,7 @@ import { VoiceSettingsForm } from './voice-settings';
 import { GlassBlobs } from './glass';
 import { Portal } from './portal';
 
-type Svc = { id: string; name: string; price: number | string };
+type Svc = { id: string; name: string; price: number | string; requiresVehicle?: boolean };
 export interface DictationProps {
   open: boolean;
   onClose: () => void;
@@ -141,6 +141,9 @@ export function DictationMode({ open, onClose, services, clients = [], catalog, 
   const level = useMicLevel(capturing);
 
   const brands = (catalog ?? []).map((b) => b.brand);
+  /** ¿Pide vehículo? Solo si algún servicio de la orden lo pide (o si aún no hay servicio). */
+  const needV = (d: DictDraft) => { const ids = Object.keys(d.items); return !ids.length || ids.some((id) => services.find((s) => s.id === id)?.requiresVehicle !== false); };
+  const missingFor = (d: DictDraft) => missingOf(d, needV(d));
   const svcName = (id: string) => services.find((s) => s.id === id)?.name ?? '';
   const totalOf = (d: DictDraft) => {
     const sub = Object.entries(d.items).reduce((s, [id, q]) => s + Number(services.find((x) => x.id === id)?.price ?? 0) * q, 0);
@@ -162,7 +165,7 @@ export function DictationMode({ open, onClose, services, clients = [], catalog, 
   function confirm(entries: Entry[]) {
     const last = entries[entries.length - 1];
     if (!last) return;
-    const miss = missingOf(last.draft);
+    const miss = missingFor(last.draft);
     chime(miss.length === 0);
     // Hablar mientras el micrófono escucha haría que se transcriba a sí mismo: solo se habla con el micrófono apagado.
     if (!capRef.current && sRef.current.speakPrompts) {
@@ -272,19 +275,19 @@ export function DictationMode({ open, onClose, services, clients = [], catalog, 
   }));
 
   async function saveOne(e: Entry) {
-    if (missingOf(e.draft).length) return patch(e.id, { open: true, error: 'Faltan datos obligatorios', status: 'error' });
+    if (missingFor(e.draft).length) return patch(e.id, { open: true, error: 'Faltan datos obligatorios', status: 'error' });
     patch(e.id, { status: 'saving', error: undefined });
     try { await onSave(e.draft, { silent: true }); patch(e.id, { status: 'saved', open: false }); chime(true); }
     catch (er) { patch(e.id, { status: 'error', error: (er as Error).message, open: true }); chime(false); }
   }
   async function saveAll() {
     setSavingAll(true);
-    for (const e of entriesRef.current) if (e.status !== 'saved' && e.status !== 'saving' && !missingOf(e.draft).length) await saveOne(e);
+    for (const e of entriesRef.current) if (e.status !== 'saved' && e.status !== 'saving' && !missingFor(e.draft).length) await saveOne(e);
     setSavingAll(false);
   }
 
   if (!open) return null;
-  const ready = entries.filter((e) => e.status !== 'saved' && !missingOf(e.draft).length).length;
+  const ready = entries.filter((e) => e.status !== 'saved' && !missingFor(e.draft).length).length;
   const pendingCount = entries.filter((e) => e.status !== 'saved').length;
   const chips: { label: string; run: () => void; icon?: React.ComponentType<{ className?: string }> }[] = [
     ...services.slice(0, 3).map((s) => ({ label: s.name, run: () => chip(s.name.toLowerCase()) })),
@@ -332,7 +335,7 @@ export function DictationMode({ open, onClose, services, clients = [], catalog, 
                 )}
 
                 {entries.map((e, n) => {
-                  const miss = missingOf(e.draft);
+                  const miss = missingFor(e.draft);
                   const saved = e.status === 'saved';
                   const veh = [e.draft.brand, e.draft.model, e.draft.color].filter(Boolean).join(' ');
                   const svcs = Object.entries(e.draft.items).map(([id, q]) => `${q > 1 ? `${q}× ` : ''}${svcName(id)}`).join(' + ');

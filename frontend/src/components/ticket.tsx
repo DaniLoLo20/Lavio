@@ -28,8 +28,10 @@ export const TicketView = forwardRef<HTMLDivElement, { order: any; tenant: Ticke
       <div className="mt-1 space-y-0.5">
         <p>Folio: <b>{o.folio ?? 'por asignar'}</b></p>
         <p>Fecha: {when(o.receivedAt)}</p>
+        {o.vehicle?.plate ? <>
         <p>Vehículo: {o.vehicle.brand} {o.vehicle.model}</p>
         <p>Placa: {o.vehicle.plate}{o.vehicle.color ? ` · ${o.vehicle.color}` : ''}</p>
+        </> : <p>Venta sin vehículo</p>}
         {o.client?.name && <p>Cliente: {o.client.name}</p>}
       </div>
       <div className="my-2 border-t border-dashed border-gray-500" />

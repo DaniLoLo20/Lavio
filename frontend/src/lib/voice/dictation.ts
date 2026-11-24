@@ -223,12 +223,15 @@ export function parseDictation(
   return { draft, missing: missingOf(draft), warnings, known };
 }
 
-export function missingOf(d: DictDraft): string[] {
+/** ehicle = false cuando los servicios dictados no piden vehículo (se vende solo con nombre/teléfono). */
+export function missingOf(d: DictDraft, vehicle = true): string[] {
   const out: string[] = [];
-  if (d.plate.length < 3) out.push('placa');
-  if (!d.brand) out.push('marca');
-  if (!d.model) out.push('modelo');
-  if (!d.color) out.push('color');
+  if (vehicle) {
+    if (d.plate.length < 3) out.push('placa');
+    if (!d.brand) out.push('marca');
+    if (!d.model) out.push('modelo');
+    if (!d.color) out.push('color');
+  }
   if (!Object.values(d.items).some((q) => q > 0)) out.push('servicio');
   return out;
 }

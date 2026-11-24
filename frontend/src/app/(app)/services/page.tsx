@@ -7,7 +7,7 @@ import { money } from '@/lib/utils';
 import { DownloadButton } from '@/components/download-button';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ErrorText, Input, Label, PageHeader } from '@/components/ui';
 
-const empty = { name: '', description: '', price: '' };
+const empty = { name: '', description: '', price: '', requiresVehicle: true };
 
 export default function ServicesPage() {
   const { user, can } = useAuth();
@@ -19,7 +19,7 @@ export default function ServicesPage() {
 
   const save = useMutation({
     mutationFn: () => {
-      const body = { name: f.name, description: f.description || undefined, price: Number(f.price) };
+      const body = { name: f.name, description: f.description || undefined, price: Number(f.price), requiresVehicle: f.requiresVehicle };
       return editing ? api(`/services/${editing}`, { method: 'PATCH', body }) : api('/services', { body });
     },
     onSuccess: done,
@@ -35,12 +35,12 @@ export default function ServicesPage() {
           {q.data?.map((s) => (
             <div key={s.id} className="flex items-center justify-between gap-3 p-4">
               <div className="min-w-0">
-                <p className="text-sm font-medium">{s.name} {!s.isActive && <Badge className="bg-muted text-muted-foreground">Inactivo</Badge>}</p>
+                <p className="text-sm font-medium">{s.name} {!s.isActive && <Badge className="bg-muted text-muted-foreground">Inactivo</Badge>} {s.requiresVehicle === false && <Badge className="bg-violet-500/15 text-violet-700 dark:text-violet-300">Sin vehículo</Badge>}</p>
                 <p className="truncate text-xs text-muted-foreground">{s.description}</p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-sm font-medium">{money(s.price, user?.tenant.currency)}</span>
-                {can('services:edit') && <Button size="sm" variant="outline" onClick={() => { setEditing(s.id); setF({ name: s.name, description: s.description ?? '', price: String(Number(s.price)) }); }}>Editar</Button>}
+                {can('services:edit') && <Button size="sm" variant="outline" onClick={() => { setEditing(s.id); setF({ name: s.name, description: s.description ?? '', price: String(Number(s.price)), requiresVehicle: s.requiresVehicle !== false }); }}>Editar</Button>}
                 {can('services:edit') && <Button size="sm" variant="ghost" onClick={() => toggle.mutate(s)}>{s.isActive ? 'Desactivar' : 'Activar'}</Button>}
                 {can('services:delete') && <Button size="sm" variant="ghost" onClick={() => confirm('¿Eliminar servicio?') && del.mutate(s.id)}>Eliminar</Button>}
               </div>
@@ -54,6 +54,10 @@ export default function ServicesPage() {
               <div><Label>Nombre</Label><Input required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></div>
               <div><Label>Descripción</Label><Input value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></div>
               <div><Label>Precio</Label><Input required type="number" min="0" step="0.01" value={f.price} onChange={(e) => setF({ ...f, price: e.target.value })} /></div>
+              <label className="flex items-start gap-3 rounded-xl border p-3 text-sm">
+                <input type="checkbox" className="mt-0.5 h-4 w-4" aria-label="Pide vehículo" checked={f.requiresVehicle} onChange={(e) => setF({ ...f, requiresVehicle: e.target.checked })} />
+                <span><span className="block font-medium">Pide vehículo (placa, marca, modelo y color)</span><span className="block text-xs text-muted-foreground">Desmárcalo para productos o servicios que se venden solo con nombre y teléfono del cliente (aromatizante, lavado de tapetes…).</span></span>
+              </label>
               <ErrorText error={save.error ?? del.error} />
               <div className="flex gap-2"><Button disabled={save.isPending}>Guardar</Button>{editing && <Button type="button" variant="ghost" onClick={done}>Cancelar</Button>}</div>
             </form>

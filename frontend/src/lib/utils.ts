@@ -48,3 +48,10 @@ export const PHOTO_TYPES = [
 ];
 
 export const METHODS: Record<string, string> = { CASH: 'Efectivo', CARD: 'Tarjeta', TRANSFER: 'Transferencia' };
+
+/** Órdenes de servicios/productos «sin vehículo»: no tienen placa. */
+export const hasVehicle = (o: any) => !!o?.vehicle?.plate;
+/** «Nissan Versa» o «Venta sin vehículo». */
+export const vehicleName = (o: any) => (hasVehicle(o) ? ` `.trim() : 'Venta sin vehículo');
+/** Placa o un guion. */
+export const plateOf = (o: any) => o?.vehicle?.plate || '—';

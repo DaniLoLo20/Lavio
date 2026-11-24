@@ -27,7 +27,7 @@ export function ticketText(o: any, t: TicketTenant, trackUrl: string): string {
     'Ticket de servicio',
     `Folio: ${o.folio ?? 'se asigna al sincronizar'}`,
     `Fecha: ${when(o.receivedAt)}`,
-    `Vehículo: ${o.vehicle.brand} ${o.vehicle.model} · ${o.vehicle.plate}${o.vehicle.color ? ` · ${o.vehicle.color}` : ''}`,
+    o.vehicle?.plate ? `Vehículo: ${o.vehicle.brand} ${o.vehicle.model} · ${o.vehicle.plate}${o.vehicle.color ? ` · ${o.vehicle.color}` : ''}` : 'Venta sin vehículo',
     '',
     '*Servicios*',
     ...lines,

@@ -38,7 +38,7 @@ const SUMMARY = STEPS.length;
 const PAY: [string, string][] = [['CASH', 'Efectivo'], ['CARD', 'Tarjeta'], ['TRANSFER', 'Transferencia'], ['LATER', 'Cobrar después']];
 const PAY_SPOKEN: Record<string, string> = { CASH: 'en efectivo', CARD: 'con tarjeta', TRANSFER: 'por transferencia', LATER: 'se cobra después' };
 
-type Svc = { id: string; name: string; price: number | string };
+type Svc = { id: string; name: string; price: number | string; requiresVehicle?: boolean };
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -119,16 +119,20 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
   const brands = (catalog ?? []).map((b) => b.brand);
 
   // totales y faltantes de un borrador
+  /** Si ningún servicio elegido pide vehículo, se omiten placa y vehículo (venta solo con nombre/teléfono). */
+  const needsVehicle = (d: VoiceDraft) => { const ids = Object.entries(d.items).filter(([, q]) => q > 0).map(([id]) => id); return !ids.length || ids.some((id) => services.find((s) => s.id === id)?.requiresVehicle !== false); };
   const calc = (d: VoiceDraft) => {
     const lines = services.filter((s) => (d.items[s.id] ?? 0) > 0);
     const subtotal = lines.reduce((s, l) => s + Number(l.price) * d.items[l.id], 0);
     const tax = (subtotal * taxRate) / 100;
     const total = Math.round((subtotal + tax) * 100) / 100;
     const missing: string[] = [];
-    if (d.plate.length < 3) missing.push('la placa');
-    if (!d.brand.trim()) missing.push('la marca');
-    if (!d.model.trim()) missing.push('el modelo');
-    if (!d.color.trim()) missing.push('el color');
+    if (needsVehicle(d)) {
+      if (d.plate.length < 3) missing.push('la placa');
+      if (!d.brand.trim()) missing.push('la marca');
+      if (!d.model.trim()) missing.push('el modelo');
+      if (!d.color.trim()) missing.push('el color');
+    }
     if (!lines.length) missing.push('el servicio');
     return { lines, subtotal, tax, total, missing };
   };
@@ -174,7 +178,8 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
   const goNext = (i: number) => {
     let n = i + 1;
     const k = known.current;
-    while (n < STEPS.length && ((STEPS[n].key === 'vehicle' && k.vehicle) || (STEPS[n].key === 'name' && k.name) || (STEPS[n].key === 'phone' && k.phone))) n++;
+    const noVeh = !needsVehicle(draftRef.current);
+    while (n < STEPS.length && (((STEPS[n].key === 'plate' || STEPS[n].key === 'vehicle') && noVeh) || (STEPS[n].key === 'vehicle' && k.vehicle) || (STEPS[n].key === 'name' && k.name) || (STEPS[n].key === 'phone' && k.phone))) n++;
     goTo(n >= STEPS.length ? SUMMARY : n);
   };
 

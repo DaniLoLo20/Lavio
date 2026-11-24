@@ -11,7 +11,7 @@ import { getDb } from '@/lib/offline/db';
 import { useLive, useObjectUrl } from '@/lib/offline/hooks';
 import { mergeOrder } from '@/lib/offline/merge';
 import { addPhotoOffline, changeStatusOffline } from '@/lib/offline/sync';
-import { METHODS, NEXT, PHOTO_TYPES, STATUS, dateTime, duration, money, type Status } from '@/lib/utils';
+import { METHODS, NEXT, PHOTO_TYPES, STATUS, dateTime, duration, money, type Status, plateOf, vehicleName } from '@/lib/utils';
 import { TicketActions, TicketView } from '@/components/ticket';
 import { TipField, sendTip } from '@/components/tips';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ErrorText, Input, Label, PageHeader, Select, StatusBadge, buttonClass } from '@/components/ui';
@@ -112,7 +112,7 @@ function OrderDetail() {
 
   return (
     <>
-      <PageHeader title={`${o.folio ?? 'Folio por asignar'} · ${o.vehicle.brand} ${o.vehicle.model}`}>
+      <PageHeader title={`${o.folio ?? 'Folio por asignar'} · ${vehicleName(o)}`}>
         {o.pending && <Badge className="bg-sky-500/15 text-sky-700 dark:text-sky-300"><CloudOff className="mr-1 h-3 w-3" />Pendiente de sincronizar</Badge>}
         {o.syncProblem && <Badge className="bg-red-500/15 text-red-700 dark:text-red-300">Requiere revisión</Badge>}
         <StatusBadge status={o.status} />
@@ -145,9 +145,9 @@ function OrderDetail() {
           <Card>
             <CardHeader><CardTitle>Vehículo</CardTitle></CardHeader>
             <CardContent className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-              <div><p className="text-xs text-muted-foreground">Placa</p><p className="font-mono font-medium">{o.vehicle.plate}</p></div>
-              <div><p className="text-xs text-muted-foreground">Marca / modelo</p><p>{o.vehicle.brand} {o.vehicle.model}</p></div>
-              <div><p className="text-xs text-muted-foreground">Color</p><p>{o.vehicle.color}</p></div>
+              <div><p className="text-xs text-muted-foreground">Placa</p><p className="font-mono font-medium">{plateOf(o)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Marca / modelo</p><p>{vehicleName(o)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Color</p><p>{o.vehicle.color || '—'}</p></div>
               <div><p className="text-xs text-muted-foreground">Recibido</p><p>{dateTime(o.receivedAt)}</p></div>
               <div><p className="text-xs text-muted-foreground">Inicio</p><p>{dateTime(o.startedAt)}</p></div>
               <div><p className="text-xs text-muted-foreground">Fin</p><p>{dateTime(o.finishedAt)}</p></div>

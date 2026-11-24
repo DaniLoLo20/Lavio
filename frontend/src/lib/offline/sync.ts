@@ -51,7 +51,8 @@ async function enqueue(op: Omit<OutboxOp, 'seq' | 'status' | 'attempts'>) {
 }
 
 export interface CreateOrderInput {
-  vehicle: { plate: string; brand: string; model: string; color: string };
+  /** null/ausente = servicio o producto que no pide vehículo */
+  vehicle?: { plate: string; brand: string; model: string; color: string } | null;
   client?: { name?: string; phone?: string; email?: string; contactPreference?: string } | null;
   notes?: string;
   items: { serviceId: string; name: string; price: number; quantity: number; priceEdited?: boolean }[];
@@ -83,7 +84,7 @@ export async function createOrderOffline(input: CreateOrderInput) {
     receivedAt: at, startedAt: null, finishedAt: null, deliveredAt: null, totalSeconds: null,
     assignedToId: input.assignedToId ?? null,
     assignedTo: input.assignedToId ? { id: input.assignedToId, fullName: input.assignedToName ?? '' } : null,
-    vehicle: { ...input.vehicle, plate: normalizePlate(input.vehicle.plate) },
+    vehicle: input.vehicle ? { ...input.vehicle, plate: normalizePlate(input.vehicle.plate) } : { plate: '', brand: '', model: '', color: '', none: true },
     client: hasClient ? { name: c!.name ?? null, phone: c!.phone ?? null, email: c!.email ?? null, contactPreference: c!.contactPreference ?? 'NONE' } : null,
     items: lines,
     payments: input.payment ? [{ id: 'local-pay', method: input.payment.method, amount: totals.total, paidAt: at }] : [],
@@ -96,7 +97,7 @@ export async function createOrderOffline(input: CreateOrderInput) {
     await db.outbox.add({
       opId, type: 'order.create', entityId: id, tenantId: s.tenantId, userId: s.id, at, status: 'pending', attempts: 0,
       payload: {
-        vehicle: input.vehicle,
+        ...(input.vehicle ? { vehicle: input.vehicle } : {}),
         client: hasClient ? c : undefined,
         notes: input.notes || undefined,
         items: input.items.map((i) => ({ serviceId: i.serviceId, quantity: i.quantity, ...(i.priceEdited ? { unitPrice: i.price } : {}) })),
