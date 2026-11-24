@@ -2,7 +2,9 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, ArchiveRestore, Banknote, Check, CheckCheck, CloudOff, MessageCircle, Search } from 'lucide-react';
+import { Archive, ArchiveRestore, Banknote, Check, CheckCheck, ChevronDown, CloudOff, MessageCircle, Search, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { getDb } from '@/lib/offline/db';
+import { discardOp } from '@/lib/offline/sync';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useOnline } from '@/lib/net';
@@ -65,6 +67,8 @@ export default function OrdersPage() {
   const canCollect = can('orders:collect') && canPrices;
   const canNotify = can('orders:notify');
   const canArchive = can('orders:archive');
+  const canDelete = can('orders:delete');
+  const [showFilters, setShowFilters] = useState(false);
 
   const dueRows = all.filter((o) => balanceOf(o) > 0.005);
   const dueTotal = dueRows.reduce((s, o) => s + balanceOf(o), 0);
@@ -83,6 +87,28 @@ export default function OrdersPage() {
     try { await api('/orders/archive', { body: { ids, archived } }); setSel(new Set()); refresh(); } catch (e) { setErr(e); }
     setBusy(false);
   }
+  /**
+   * Eliminar: las sincronizadas se borran en el servidor (con sus cobros) y dejan de contar en dashboard, caja y
+   * reportes. Las que aún no se sincronizan solo existen en este dispositivo: se descartan de la cola.
+   */
+  async function removeOrders(list: any[]) {
+    if (!list.length) return;
+    const paid = list.filter((o) => paidOf(o) > 0).length;
+    const msg = `¿Eliminar ${list.length} orden(es)?${paid ? ` ${paid} tiene(n) cobros: también se quitarán de la caja y de los reportes.` : ''} Esta acción no se puede deshacer desde la app.`;
+    if (!confirm(msg)) return;
+    setBusy(true); setErr(undefined);
+    try {
+      const server = list.filter(synced).map((o) => o.id);
+      if (server.length) await api('/orders/delete', { body: { ids: server } });
+      for (const o of list.filter((x) => !synced(x))) {
+        const ops = await getDb().outbox.where('entityId').equals(o.id).toArray();
+        const create = ops.find((op) => op.type === 'order.create');
+        if (create?.seq) await discardOp(create.seq); else await getDb().orders.delete(o.id);
+      }
+      setSel(new Set()); refresh();
+    } catch (e) { setErr(e); }
+    setBusy(false);
+  }
   const refresh = () => ['orders', 'cash', 'dashboard', 'finance'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
 
   /** Marca como finalizadas (funciona sin conexión: queda en cola y se sincroniza). */
@@ -99,6 +125,8 @@ export default function OrdersPage() {
     if (canNotify && ready.length) setNotify(ready);
   }
 
+  const dayLabel = DAY_CHIPS.find((c) => from === c.from() && to === c.to() && c.label !== 'Todo')?.label ?? (from || to ? [from, to].filter(Boolean).join(' → ') : '');
+  const activeFilters = (dayLabel ? 1 : 0) + (status ? 1 : 0);
   const chips: { k: View; label: string; n?: number; cls?: string }[] = [
     { k: 'all', label: 'Todas' },
     { k: 'open', label: 'Por finalizar', n: all.filter((o) => !isDone(o)).length },
@@ -133,27 +161,45 @@ export default function OrdersPage() {
           </Glass>
         )}
 
-        <Glass className="space-y-3 p-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Buscar folio, código, placa o cliente" value={search} onChange={(e) => setSearch(e.target.value)} className="h-11 rounded-2xl bg-white/70 pl-10 dark:bg-white/10" />
+        <Glass className="p-3">
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3.5 top-3.5 h-4 w-4 text-muted-foreground" />
+              <Input placeholder="Buscar folio, placa o cliente" value={search} onChange={(e) => setSearch(e.target.value)} className="h-11 rounded-2xl bg-white/70 pl-10 dark:bg-white/10" />
+            </div>
+            <button type="button" aria-expanded={showFilters} aria-controls="order-filters" onClick={() => setShowFilters((v) => !v)}
+              className={cn('relative flex h-11 shrink-0 items-center gap-1.5 rounded-2xl px-3 text-sm font-medium transition active:scale-95', showFilters ? 'bg-primary text-primary-foreground' : 'bg-black/5 dark:bg-white/10')}>
+              <SlidersHorizontal className="h-4 w-4" /><span className="hidden sm:inline">Filtros</span>
+              {activeFilters > 0 && <span className={cn('grid h-5 min-w-5 place-items-center rounded-full px-1 text-[11px] font-bold', showFilters ? 'bg-white text-primary' : 'bg-primary text-primary-foreground')}>{activeFilters}</span>}
+              <ChevronDown className={cn('h-4 w-4 transition', showFilters && 'rotate-180')} />
+            </button>
           </div>
-          <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none]" role="group" aria-label="Filtrar por días">
-            {DAY_CHIPS.map((c) => {
-              const on = from === c.from() && to === c.to();
-              return <button key={c.label} aria-pressed={on} onClick={() => { setFrom(c.from()); setTo(c.to()); }} className={cn('shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition active:scale-95', on ? 'bg-primary text-primary-foreground shadow' : 'bg-black/5 text-foreground dark:bg-white/10')}>{c.label}</button>;
-            })}
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <Select value={status} onChange={(e) => setStatus(e.target.value)} className="col-span-2 h-10 rounded-2xl bg-white/70 text-sm sm:col-span-1 dark:bg-white/10" aria-label="Estado">
-              <option value="">Todos los estados</option>
-              {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}
-            </Select>
-            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-10 rounded-2xl bg-white/70 dark:bg-white/10" aria-label="Desde" />
-            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-10 rounded-2xl bg-white/70 dark:bg-white/10" aria-label="Hasta" />
-          </div>
+          {!showFilters && activeFilters > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+              {dayLabel && <span className="rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary">{dayLabel}</span>}
+              {status && <span className="rounded-full bg-primary/10 px-2.5 py-1 font-medium text-primary">{STATUS[status as keyof typeof STATUS]?.label ?? status}</span>}
+              <button type="button" onClick={() => { setFrom(''); setTo(''); setStatus(''); }} className="text-muted-foreground underline">Limpiar</button>
+            </div>
+          )}
+          {showFilters && (
+            <div id="order-filters" className="mt-3 space-y-3">
+              <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none]" role="group" aria-label="Filtrar por días">
+                {DAY_CHIPS.map((c) => {
+                  const on = from === c.from() && to === c.to();
+                  return <button key={c.label} aria-pressed={on} onClick={() => { setFrom(c.from()); setTo(c.to()); }} className={cn('shrink-0 rounded-full px-3.5 py-1.5 text-xs font-medium transition active:scale-95', on ? 'bg-primary text-primary-foreground shadow' : 'bg-black/5 text-foreground dark:bg-white/10')}>{c.label}</button>;
+                })}
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <Select value={status} onChange={(e) => setStatus(e.target.value)} className="col-span-2 h-10 rounded-2xl bg-white/70 text-sm sm:col-span-1 dark:bg-white/10" aria-label="Estado">
+                  <option value="">Todos los estados</option>
+                  {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS[s].label}</option>)}
+                </Select>
+                <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-10 rounded-2xl bg-white/70 dark:bg-white/10" aria-label="Desde" />
+                <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-10 rounded-2xl bg-white/70 dark:bg-white/10" aria-label="Hasta" />
+              </div>
+            </div>
+          )}
         </Glass>
-
         <Segmented label="Vista" value={view} onChange={setView} items={chips.map((c) => ({ k: c.k, label: c.n !== undefined ? `${c.label} (${c.n})` : c.label }))} />
 
         {chosen.length > 0 && (
@@ -165,6 +211,7 @@ export default function OrdersPage() {
             {canArchive && view !== 'archived' && <Button variant="outline" className="rounded-full bg-white/60" disabled={busy || !online || !chosen.some(archivable)} title="Solo finalizadas y pagadas" onClick={() => void archive(chosen, true)}><Archive className="h-4 w-4" />Archivar</Button>}
             {canArchive && view === 'archived' && <Button variant="outline" className="rounded-full bg-white/60" disabled={busy || !online} onClick={() => void archive(chosen, false)}><ArchiveRestore className="h-4 w-4" />Desarchivar</Button>}
             {canCollect && <Button variant="success" className="rounded-full" disabled={!online || !chosen.some((o) => balanceOf(o) > 0.005 && synced(o))} onClick={() => setCollect(chosen.filter((o) => balanceOf(o) > 0.005 && synced(o)))}><Banknote className="h-4 w-4" />Cobrar</Button>}
+            {canDelete && <Button variant="destructive" className="rounded-full" disabled={busy || (!online && chosen.some(synced))} onClick={() => void removeOrders(chosen)}><Trash2 className="h-4 w-4" />Eliminar</Button>}
             <Button variant="ghost" className="rounded-full" onClick={() => setSel(new Set())}>Quitar selección</Button>
           </Glass>
         )}
@@ -207,6 +254,7 @@ export default function OrdersPage() {
                   {canStatus && !isDone(o) && <Button size="sm" variant="outline" className="rounded-full bg-white/60 px-4" disabled={busy} onClick={() => void finalize([o])}>Finalizar</Button>}
                   {canArchive && view !== 'archived' && archivable(o) && <Button size="sm" variant="ghost" className="rounded-full" disabled={busy || !online} onClick={() => void archive([o], true)}><Archive className="h-3.5 w-3.5" />Archivar</Button>}
                   {canArchive && view === 'archived' && <Button size="sm" variant="ghost" className="rounded-full" disabled={busy || !online} onClick={() => void archive([o], false)}><ArchiveRestore className="h-3.5 w-3.5" />Desarchivar</Button>}
+                  {canDelete && <button type="button" aria-label={`Eliminar ${o.folio ?? o.vehicle.plate}`} disabled={busy || (!online && synced(o))} onClick={() => void removeOrders([o])} className="ml-auto grid h-8 w-8 place-items-center rounded-full text-muted-foreground transition hover:bg-red-500/10 hover:text-red-600 active:scale-90 disabled:opacity-30"><Trash2 className="h-4 w-4" /></button>}
                 </div>
               </div>
             );

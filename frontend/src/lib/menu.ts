@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { ArrowLeftRight, BarChart3, Boxes, Building, Building2, ClipboardList, Cog, Droplets, LineChart, Package, Settings, ShieldCheck, ShoppingCart, Sparkles, Tags, Truck, UserRound, Users, Wallet } from 'lucide-react';
+import { ArrowLeftRight, BarChart3, ListOrdered, Boxes, Building, Building2, ClipboardList, Cog, Droplets, LineChart, Package, Settings, ShieldCheck, ShoppingCart, Sparkles, Tags, Truck, UserRound, Users, Wallet } from 'lucide-react';
 
 export interface MenuItem {
   href: string;
@@ -57,6 +57,7 @@ export const SUPER_MENU: MenuEntry[] = [
   ]),
   group('config', 'Configuración', Settings, [
     { href: '/platform/roles', label: 'Roles y permisos', icon: ShieldCheck },
+    { href: '/platform/menu', label: 'Orden del menú', icon: ListOrdered },
   ]),
 ];
 
@@ -67,15 +68,56 @@ const HIDDEN_ROUTES: { prefix: string; perm: string }[] = [
   { prefix: '/inventory', perm: 'inventory:view' },
 ];
 
+/** Orden del menú definido por el superadmin (solo rutas y grupos; los permisos siguen decidiendo qué se ve). */
+export type LayoutEntry = { type: 'item'; href: string } | { type: 'group'; key: string; label?: string; items: string[] };
+export type MenuLayout = LayoutEntry[];
+
+/** Menú base expresado como orden (punto de partida del editor). */
+export const defaultLayout = (): MenuLayout =>
+  TENANT_MENU.map((e) => (e.type === 'item' ? { type: 'item', href: e.item.href } : { type: 'group', key: e.key, items: e.items.map((i) => i.href) }));
+
+/**
+ * Aplica el orden guardado al menú base. Lo que el orden no mencione (p. ej. secciones nuevas de una versión
+ * futura) se agrega en su lugar original, así nada desaparece del menú por un orden viejo.
+ */
+export function applyLayout(base: MenuEntry[], layout?: MenuLayout | null): MenuEntry[] {
+  if (!layout?.length) return base;
+  const items = new Map(flatItems(base).map((i) => [i.href, i] as const));
+  const groups = new Map(base.filter((e): e is Extract<MenuEntry, { type: 'group' }> => e.type === 'group').map((g) => [g.key, g] as const));
+  const used = new Set<string>();
+  const out: MenuEntry[] = [];
+  for (const e of layout) {
+    if (e.type === 'item') {
+      const it = items.get(e.href);
+      if (it && !used.has(it.href)) { used.add(it.href); out.push({ type: 'item', item: it }); }
+    } else {
+      const g = groups.get(e.key);
+      if (!g) continue;
+      const its = e.items.map((h) => items.get(h)).filter((it): it is MenuItem => !!it && !used.has(it.href));
+      its.forEach((i) => used.add(i.href));
+      out.push({ type: 'group', key: g.key, label: e.label?.trim() || g.label, icon: g.icon, items: its });
+    }
+  }
+  for (const e of base) {
+    if (e.type === 'item') { if (!used.has(e.item.href)) { used.add(e.item.href); out.push(e); } continue; }
+    const left = e.items.filter((i) => !used.has(i.href));
+    if (!left.length) continue;
+    left.forEach((i) => used.add(i.href));
+    const ex = out.find((x): x is Extract<MenuEntry, { type: 'group' }> => x.type === 'group' && x.key === e.key);
+    if (ex) ex.items.push(...left); else out.push({ ...e, items: left });
+  }
+  return out;
+}
+
 export const can = (u: UserLike | null | undefined, perm?: string) => !perm || !!u?.permissions?.includes(perm);
 
 const itemVisible = (u: UserLike, i: MenuItem) => can(u, i.perm) && !(i.hideIf && can(u, i.hideIf));
 const labelOf = (u: UserLike, i: MenuItem) => (i.altLabel && can(u, i.altLabel.ifPerm) ? i.altLabel.label : i.label);
 
 /** Menú del usuario: solo lo permitido. Un grupo con un único elemento visible se muestra como elemento suelto. */
-export function buildMenu(u: UserLike | null | undefined): MenuEntry[] {
+export function buildMenu(u: UserLike | null | undefined, layout?: MenuLayout | null): MenuEntry[] {
   if (!u) return [];
-  const source = u.role === 'SUPERADMIN' ? SUPER_MENU : TENANT_MENU;
+  const source = u.role === 'SUPERADMIN' ? SUPER_MENU : applyLayout(TENANT_MENU, layout);
   const out: MenuEntry[] = [];
   for (const e of source) {
     if (e.type === 'item') { if (itemVisible(u, e.item)) out.push({ type: 'item', item: { ...e.item, label: labelOf(u, e.item) } }); continue; }

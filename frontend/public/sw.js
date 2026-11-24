@@ -7,7 +7,7 @@
  * - /api/* NUNCA se cachea aqui: los datos los guarda React Query (IndexedDB) y los cambios, la cola de sincronizacion.
  * - Background Sync: al volver la red avisa a las ventanas abiertas para vaciar la cola.
  */
-const VERSION = 'v22';
+const VERSION = 'v23';
 const SHELL = `lavio-shell-${VERSION}`;
 const STATIC = 'lavio-static';
 const PHOTOS = 'lavio-photos';
@@ -17,7 +17,7 @@ const MAX_PHOTOS = 150;
 const ROUTES = [
   '/', '/login', '/track', '/dashboard', '/pos', '/orders', '/orders/detail', '/washer', '/services', '/clients',
   '/inventory', '/inventory/products', '/inventory/movements', '/purchases', '/suppliers', '/users', '/settings', '/cash', '/cash/session', '/finance',
-  '/platform', '/platform/users', '/platform/clients', '/platform/orders', '/platform/roles',
+  '/platform', '/platform/users', '/platform/clients', '/platform/orders', '/platform/roles', '/platform/menu',
 ];
 const ASSETS = ['/offline.html', '/manifest.webmanifest', '/brand/lavio-mark.png', '/brand/lavio-full.png', '/icon-192.png', '/icon-512.png'];
 

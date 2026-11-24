@@ -4,7 +4,9 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { ChevronDown, LifeBuoy, LogOut, Menu as MenuIcon, ShieldAlert, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
-import { buildMenu, firstAllowedPath, flatItems, pathAllowed, type MenuEntry, type MenuItem } from '@/lib/menu';
+import { buildMenu, firstAllowedPath, flatItems, pathAllowed, type MenuEntry, type MenuItem, type MenuLayout } from '@/lib/menu';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui';
@@ -63,7 +65,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     logout();
   };
 
-  const entries = useMemo(() => buildMenu(user), [user]);
+  // Orden del menú definido por el superadmin (se guarda en caché: también sirve sin conexión)
+  const layoutQ = useQuery({ queryKey: ['menu', 'layout'], queryFn: () => api<{ layout: MenuLayout | null }>('/menu/layout'), enabled: !!user, staleTime: 5 * 60_000 });
+  const layout = layoutQ.data?.layout ?? null;
+  const entries = useMemo(() => buildMenu(user, layout), [user, layout]);
   const flat = useMemo(() => flatItems(entries), [entries]);
   const allowed = !!user && pathAllowed(user, path);
 
@@ -77,7 +82,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const subtitle = user.role === 'SUPERADMIN' ? 'Plataforma' : user.tenant.name;
   // Barra inferior (celular): hasta 4 accesos directos + "Menú" con todo lo demás
   const QUICK = ['/dashboard', '/pos', '/orders', '/washer', '/cash'];
-  const quick = flat.length <= 5 ? flat : [...QUICK.map((h) => flat.find((i) => i.href === h)).filter(Boolean) as MenuItem[], ...flat].filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
+  // con un orden definido, la barra inferior respeta ese orden (las 4 primeras secciones permitidas)
+  const quick = flat.length <= 5 ? flat : layout?.length ? flat.slice(0, 4) : [...QUICK.map((h) => flat.find((i) => i.href === h)).filter(Boolean) as MenuItem[], ...flat].filter((v, i, a) => a.indexOf(v) === i).slice(0, 4);
 
   return (
     <div className="min-h-screen md:flex">

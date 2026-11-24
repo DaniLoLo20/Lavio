@@ -1,9 +1,9 @@
 'use client';
 import { Suspense, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
-import { Camera, CloudOff, Mail, MessageCircle } from 'lucide-react';
+import { Camera, CloudOff, Mail, MessageCircle, Trash2 } from 'lucide-react';
 import { api, compressImage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useOnline } from '@/lib/net';
@@ -35,6 +35,11 @@ function OrderDetail() {
   const canPrices = can('orders:prices');
   const canCollect = can('orders:collect');
   const canAssign = can('orders:assign');
+  const router = useRouter();
+  const del = useMutation({
+    mutationFn: () => api(`/orders/${id}`, { method: 'DELETE' }),
+    onSuccess: () => { ['orders', 'cash', 'dashboard', 'finance'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); router.replace('/orders'); },
+  });
   const canStatus = can('orders:status');
   const canPhotos = can('orders:photos');
   const cur = user?.tenant.currency;
@@ -111,7 +116,14 @@ function OrderDetail() {
         {o.pending && <Badge className="bg-sky-500/15 text-sky-700 dark:text-sky-300"><CloudOff className="mr-1 h-3 w-3" />Pendiente de sincronizar</Badge>}
         {o.syncProblem && <Badge className="bg-red-500/15 text-red-700 dark:text-red-300">Requiere revisión</Badge>}
         <StatusBadge status={o.status} />
+        {can('orders:delete') && synced && (
+          <Button size="sm" variant="ghost" className="rounded-full text-red-600 hover:bg-red-500/10" disabled={del.isPending || !online}
+            onClick={() => confirm(`¿Eliminar la orden ${o.folio}?${(o.payments ?? []).length ? ' Sus cobros también se quitarán de la caja y de los reportes.' : ''} No se puede deshacer desde la app.`) && del.mutate()}>
+            <Trash2 className="h-4 w-4" />Eliminar
+          </Button>
+        )}
       </PageHeader>
+      <ErrorText error={del.error} />
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
