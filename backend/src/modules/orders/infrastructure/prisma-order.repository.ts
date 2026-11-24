@@ -16,6 +16,10 @@ const DETAIL = {
 
 const isUniqueViolation = (e: any) => e?.code === 'P2002';
 
+/** Órdenes sin vehículo (servicios/productos que no lo piden): se devuelve un vehículo vacío para que nada falle al mostrarla. */
+export const NO_VEHICLE = { id: null, plate: '', brand: '', model: '', color: '', none: true } as const;
+export const withVehicle = <T extends { vehicle?: unknown } | null>(o: T): T => (o && !o.vehicle ? ({ ...o, vehicle: NO_VEHICLE } as T) : o);
+
 @Injectable()
 export class PrismaOrderRepository extends WashOrderRepository {
   constructor(private prisma: PrismaService) {
@@ -75,12 +79,15 @@ export class PrismaOrderRepository extends WashOrderRepository {
         }
       }
 
-      const plate = normalizePlate(i.vehicle.plate);
-      const found = await tx.vehicle.findFirst({ where: { tenantId: i.tenantId, plate, deletedAt: null } });
-      const vData = { brand: i.vehicle.brand, model: i.vehicle.model, color: i.vehicle.color, ...(clientId ? { clientId } : {}) };
-      const vehicle = found
-        ? await tx.vehicle.update({ where: { id: found.id }, data: { ...vData, updatedById: i.userId } })
-        : await tx.vehicle.create({ data: { ...vData, plate, tenantId: i.tenantId, createdById: i.userId } });
+      let vehicle: { id: string } | null = null;
+      if (i.vehicle) {
+        const plate = normalizePlate(i.vehicle.plate);
+        const found = await tx.vehicle.findFirst({ where: { tenantId: i.tenantId, plate, deletedAt: null } });
+        const vData = { brand: i.vehicle.brand, model: i.vehicle.model, color: i.vehicle.color, ...(clientId ? { clientId } : {}) };
+        vehicle = found
+          ? await tx.vehicle.update({ where: { id: found.id }, data: { ...vData, updatedById: i.userId } })
+          : await tx.vehicle.create({ data: { ...vData, plate, tenantId: i.tenantId, createdById: i.userId } });
+      }
 
       const order = await tx.washOrder.create({
         data: {
@@ -88,7 +95,7 @@ export class PrismaOrderRepository extends WashOrderRepository {
           tenantId: i.tenantId,
           folio,
           code,
-          vehicleId: vehicle.id,
+          vehicleId: vehicle?.id ?? null,
           clientId,
           assignedToId: i.assignedToId ?? null,
           notes: i.notes,
@@ -106,20 +113,20 @@ export class PrismaOrderRepository extends WashOrderRepository {
     });
   }
 
-  findById(tenantId: string, id: string) {
-    return this.prisma.washOrder.findFirst({ where: { id, tenantId, deletedAt: null }, include: DETAIL });
+  async findById(tenantId: string, id: string) {
+    return withVehicle(await this.prisma.washOrder.findFirst({ where: { id, tenantId, deletedAt: null }, include: DETAIL }));
   }
 
-  findByCode(code: string) {
-    return this.prisma.washOrder.findFirst({
+  async findByCode(code: string) {
+    return withVehicle(await this.prisma.washOrder.findFirst({
       where: { code, deletedAt: null },
       include: { ...DETAIL, tenant: { select: { name: true, logoPath: true } } },
-    });
+    }));
   }
 
-  findMany(f: OrderFilter) {
+  async findMany(f: OrderFilter) {
     const search = f.search?.trim();
-    return this.prisma.washOrder.findMany({
+    const rows = await this.prisma.washOrder.findMany({
       where: {
         tenantId: f.tenantId,
         deletedAt: null,
@@ -150,6 +157,7 @@ export class PrismaOrderRepository extends WashOrderRepository {
       orderBy: { receivedAt: 'desc' },
       take: f.limit,
     });
+    return rows.map(withVehicle);
   }
 
   async applyStatus(a: Parameters<WashOrderRepository['applyStatus']>[0]) {
@@ -225,6 +233,6 @@ export class PrismaOrderRepository extends WashOrderRepository {
 
   async activeServices(tenantId: string, ids: string[]) {
     const rows = await this.prisma.service.findMany({ where: { tenantId, id: { in: ids }, isActive: true, deletedAt: null } });
-    return rows.map((s) => ({ id: s.id, name: s.name, price: Number(s.price) }));
+    return rows.map((s) => ({ id: s.id, name: s.name, price: Number(s.price), requiresVehicle: s.requiresVehicle }));
   }
 }

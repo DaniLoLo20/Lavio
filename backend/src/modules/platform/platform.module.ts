@@ -254,7 +254,7 @@ export class PlatformDirectoryService {
       orderBy: { receivedAt: 'desc' },
       take: 200,
     });
-    return rows;
+    return rows.map((o) => (o.vehicle ? o : { ...o, vehicle: { plate: '', brand: '', model: '', color: '' } }));
   }
 }
 

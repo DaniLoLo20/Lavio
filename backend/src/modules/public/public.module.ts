@@ -21,7 +21,7 @@ export class PublicController {
     const o = await this.repo.findByCode(code);
     if (!o) throw new NotFoundException('Código no encontrado');
     const step = ORDER_STATUSES.indexOf(o.status);
-    const plate: string = o.vehicle.plate;
+    const plate: string = o.vehicle?.plate ?? '';
     return {
       business: o.tenant.name,
       logoUrl: o.tenant.logoPath ? `/api/uploads/${o.tenant.logoPath}` : null,
@@ -31,7 +31,7 @@ export class PublicController {
       steps: ORDER_STATUSES,
       progress: Math.round((step / (ORDER_STATUSES.length - 1)) * 100),
       vehicle: {
-        brand: o.vehicle.brand, model: o.vehicle.model, color: o.vehicle.color,
+        brand: o.vehicle?.brand ?? '', model: o.vehicle?.model ?? '', color: o.vehicle?.color ?? '',
         plate: plate.length > 3 ? plate.slice(0, 3) + '*'.repeat(plate.length - 3) : plate,
       },
       services: o.items.map((i: any) => ({ name: i.name, quantity: i.quantity })),

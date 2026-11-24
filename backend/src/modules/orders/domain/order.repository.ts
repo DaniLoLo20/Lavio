@@ -9,7 +9,7 @@ export interface NewOrderInput {
   code?: string;
   /** Momento real de recepcion (puede ser anterior a "ahora" si se capturo sin conexion). */
   receivedAt?: Date;
-  vehicle: { plate: string; brand: string; model: string; color: string };
+  vehicle: { plate: string; brand: string; model: string; color: string } | null;
   client: { id?: string; name?: string; phone?: string; email?: string; contactPreference?: string } | null;
   notes?: string;
   assignedToId?: string | null;
@@ -50,5 +50,5 @@ export abstract class WashOrderRepository {
   abstract setArchived(tenantId: string, ids: string[], archived: boolean, userId: string): Promise<number>;
   abstract washerBelongsToTenant(tenantId: string, userId: string): Promise<boolean>;
   abstract tenantSettings(tenantId: string): Promise<{ taxRate: number; countryCode: string; name: string }>;
-  abstract activeServices(tenantId: string, ids: string[]): Promise<{ id: string; name: string; price: number }[]>;
+  abstract activeServices(tenantId: string, ids: string[]): Promise<{ id: string; name: string; price: number; requiresVehicle: boolean }[]>;
 }

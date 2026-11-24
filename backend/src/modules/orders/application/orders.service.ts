@@ -43,6 +43,8 @@ export class OrdersService {
       const unitPrice = custom ? i.unitPrice! : s.price;
       return { serviceId: s.id, name: s.name, unitPrice, quantity: i.quantity, total: Math.round(unitPrice * i.quantity * 100) / 100 };
     });
+    // La placa solo es obligatoria si algún servicio de la orden la pide (los «sin vehículo» se venden solo con nombre/teléfono)
+    if (!dto.vehicle && services.some((s) => s.requiresVehicle)) throw new BadRequestException('Este servicio pide placa y datos del vehículo');
     const totals = computeTotals(lines, dto.discount ?? 0, settings.taxRate);
     const c = dto.client;
     const hasClient = !!(c && (c.name || c.phone || c.email));
@@ -52,7 +54,7 @@ export class OrdersService {
       id: dto.id,
       code: dto.code,
       receivedAt: clampTime(dto.createdAt),
-      vehicle: { ...dto.vehicle, plate: normalizePlate(dto.vehicle.plate) },
+      vehicle: dto.vehicle ? { ...dto.vehicle, plate: normalizePlate(dto.vehicle.plate) } : null,
       client: hasClient ? c! : null,
       notes: dto.notes,
       assignedToId: dto.assignedToId,
@@ -222,8 +224,8 @@ export class OrdersService {
     const s = await this.repo.tenantSettings(user.tenantId);
     const name = o.client?.name?.trim().split(' ')[0] || 'cliente';
     const message =
-      `Hola ${name}.\n\nSu vehículo ${o.vehicle.brand} ${o.vehicle.model} placas ${o.vehicle.plate} se encuentra listo para entrega.\n\nFolio ${o.folio}.\n\nGracias por su preferencia.`;
-    const subject = `Su vehículo está listo - Folio ${o.folio}`;
+      `Hola ${name}.\n\n${o.vehicle?.plate ? `Su vehículo ${o.vehicle.brand} ${o.vehicle.model} placas ${o.vehicle.plate} se encuentra listo para entrega.` : 'Su pedido se encuentra listo para entrega.'}\n\nFolio ${o.folio}.\n\nGracias por su preferencia.`;
+    const subject = o.vehicle?.plate ? `Su vehículo está listo - Folio ${o.folio}` : `Su pedido está listo - Folio ${o.folio}`;
     let phone = (o.client?.phone ?? '').replace(/\D/g, '');
     if (phone.length === 10) phone = s.countryCode + phone;
     return {

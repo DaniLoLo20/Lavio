@@ -9,12 +9,16 @@ class CreateServiceDto {
   @IsOptional() @IsString() description?: string;
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) price: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  /** false = no pide placa ni datos del vehículo */
+  @IsOptional() @IsBoolean() requiresVehicle?: boolean;
 }
 class UpdateServiceDto {
   @IsOptional() @IsString() @MinLength(2) name?: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) price?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  /** false = no pide placa ni datos del vehículo */
+  @IsOptional() @IsBoolean() requiresVehicle?: boolean;
 }
 
 @Injectable()

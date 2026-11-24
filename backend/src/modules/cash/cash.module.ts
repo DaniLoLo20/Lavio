@@ -168,7 +168,7 @@ export class CashService {
       return {
         id: o.id, folio: o.folio, code: o.code, status: o.status, receivedAt: o.receivedAt,
         total: num(o.total), paid, due: r2(num(o.total) - paid),
-        vehicle: o.vehicle, clientName: o.client?.name ?? null, clientPhone: o.client?.phone ?? null,
+        vehicle: o.vehicle ?? { plate: '', brand: '', model: '' }, clientName: o.client?.name ?? null, clientPhone: o.client?.phone ?? null,
       };
     });
   }
@@ -326,7 +326,7 @@ export class CashService {
     if (dto.orderId) {
       const o = await this.prisma.washOrder.findFirst({ where: { id: dto.orderId, tenantId: u.tenantId, deletedAt: null }, include: { vehicle: { select: { plate: true } } } });
       if (!o) throw new BadRequestException('Orden inválida');
-      concept = `Propina · ${o.folio} · ${o.vehicle.plate}`;
+      concept = `Propina · ${o.folio}${o.vehicle?.plate ? ` · ${o.vehicle.plate}` : ''}`;
       washerId = washerId ?? o.assignedToId ?? undefined;
     } else if (dto.note?.trim()) concept = `Propina · ${dto.note.trim()}`;
     let responsibleName = 'Propina general';

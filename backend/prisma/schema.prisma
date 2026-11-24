@@ -179,6 +179,8 @@ model Service {
   description String?
   price       Decimal   @db.Decimal(12, 2)
   isActive    Boolean   @default(true) @map("is_active")
+  // false = se vende sin placa ni datos del vehículo (solo nombre y teléfono del cliente, opcionales)
+  requiresVehicle Boolean @default(true) @map("requires_vehicle")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
@@ -197,7 +199,8 @@ model WashOrder {
   tenantId     String      @map("tenant_id") @db.Uuid
   folio        String
   code         String      @unique
-  vehicleId    String      @map("vehicle_id") @db.Uuid
+  // opcional: los servicios/productos que no piden vehículo (p. ej. venta de un aromatizante) no lo llevan
+  vehicleId    String?     @map("vehicle_id") @db.Uuid
   clientId     String?     @map("client_id") @db.Uuid
   assignedToId String?     @map("assigned_to_id") @db.Uuid
   status       OrderStatus @default(RECIBIDO)
@@ -221,7 +224,7 @@ model WashOrder {
   updatedById  String?     @map("updated_by") @db.Uuid
 
   tenant       Tenant                   @relation(fields: [tenantId], references: [id])
-  vehicle      Vehicle                  @relation(fields: [vehicleId], references: [id])
+  vehicle      Vehicle?                 @relation(fields: [vehicleId], references: [id])
   client       Client?                  @relation(fields: [clientId], references: [id])
   assignedTo   User?                    @relation("AssignedWasher", fields: [assignedToId], references: [id])
   items        WashOrderItem[]

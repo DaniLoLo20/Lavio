@@ -41,7 +41,8 @@ export class CreateOrderDto {
   @IsOptional() @Matches(/^[ABCDEFGHJKMNPQRSTUVWXYZ2-9]{6}$/, { message: 'code inválido' }) code?: string;
   /** Momento real de captura (ISO); se acota a los ultimos 30 dias y nunca al futuro. */
   @IsOptional() @IsDateString() createdAt?: string;
-  @ValidateNested() @Type(() => VehicleDto) vehicle: VehicleDto;
+  /** Obligatorio salvo que todos los servicios de la orden sean «sin vehículo» */
+  @IsOptional() @ValidateNested() @Type(() => VehicleDto) vehicle?: VehicleDto;
   @IsOptional() @ValidateNested() @Type(() => ClientInputDto) client?: ClientInputDto;
   @IsOptional() @IsString() notes?: string;
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => ItemDto) items: ItemDto[];

@@ -55,7 +55,7 @@ export class ReportsService {
         });
         return { name: 'ordenes', csv: toCsv(
           ['Folio', 'Código', 'Fecha', 'Estado', 'Placa', 'Marca', 'Modelo', 'Color', 'Cliente', 'Teléfono', 'Lavador', 'Servicios', 'Subtotal', 'Descuento', 'IVA', 'Total', 'Pagado', 'Inicio', 'Fin', 'Minutos'],
-          rows.map((o) => [o.folio, o.code, o.receivedAt, o.status, o.vehicle.plate, o.vehicle.brand, o.vehicle.model, o.vehicle.color, o.client?.name, o.client?.phone, o.assignedTo?.fullName,
+          rows.map((o) => [o.folio, o.code, o.receivedAt, o.status, o.vehicle?.plate ?? '', o.vehicle?.brand ?? '', o.vehicle?.model ?? '', o.vehicle?.color, o.client?.name, o.client?.phone, o.assignedTo?.fullName,
             o.items.map((i) => `${i.quantity}x ${i.name}`).join('; '), n(o.subtotal), n(o.discount), n(o.taxAmount), n(o.total), o.payments.reduce((s, p) => s + n(p.amount), 0), o.startedAt, o.finishedAt, o.totalSeconds != null ? Math.round(o.totalSeconds / 60) : '']),
         ) };
       }
