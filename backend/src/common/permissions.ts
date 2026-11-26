@@ -15,6 +15,7 @@ export const CATALOG: PermResource[] = [
     actions: [
       A('view', 'Ver órdenes'), A('create', 'Crear órdenes (Nueva orden)'), A('status', 'Cambiar estatus'), A('photos', 'Tomar fotografías'),
       A('notify', 'Avisar al cliente'), A('assign', 'Asignar lavador'), A('collect', 'Cobrar (registrar pagos)'), A('deliver', 'Reabrir una orden finalizada'),
+      A('edit', 'Editar los datos del vehículo de la orden'),
       A('archive', 'Archivar y desarchivar órdenes'),
       A('delete', 'Eliminar órdenes', 'Las quita del dashboard, la caja, finanzas y reportes junto con sus cobros'),
       A('edit_price', 'Modificar el precio de un servicio antes de cobrar', 'El precio del catálogo no cambia; solo el de esta orden'),

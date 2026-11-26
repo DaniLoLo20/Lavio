@@ -7,7 +7,7 @@ import { mkdirSync, promises as fsp } from 'fs';
 import { join } from 'path';
 import { AuthUser, CurrentUser, Perms } from '../../../common/guards';
 import { OrdersService } from '../application/orders.service';
-import { ArchiveDto, AssignDto, DeleteOrdersDto, ChangeStatusDto, CreateOrderDto, ItemPriceDto, PaymentDto } from './dto';
+import { ArchiveDto, AssignDto, DeleteOrdersDto, EditVehicleDto, ChangeStatusDto, CreateOrderDto, ItemPriceDto, PaymentDto } from './dto';
 
 const UPLOAD_DIR = () => process.env.UPLOAD_DIR || '/storage/uploads';
 const EXT: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/heic': '.heic' };
@@ -22,6 +22,9 @@ export class OrdersController {
 
   @Perms('orders:create') @Post()
   create(@CurrentUser() u: AuthUser, @Body() dto: CreateOrderDto) { return this.svc.create(u, dto); }
+
+  @Perms('orders:edit') @Patch(':id/vehicle')
+  vehicle(@CurrentUser() u: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() dto: EditVehicleDto) { return this.svc.changeVehicle(u, id, dto); }
 
   @Perms('orders:delete') @Post('delete')
   removeMany(@CurrentUser() u: AuthUser, @Body() dto: DeleteOrdersDto) { return this.svc.remove(u, dto.ids.slice(0, 200)); }

@@ -83,10 +83,12 @@ export class PrismaOrderRepository extends WashOrderRepository {
       if (i.vehicle) {
         const plate = normalizePlate(i.vehicle.plate);
         const found = await tx.vehicle.findFirst({ where: { tenantId: i.tenantId, plate, deletedAt: null } });
-        const vData = { brand: i.vehicle.brand, model: i.vehicle.model, color: i.vehicle.color, ...(clientId ? { clientId } : {}) };
+        const brand = i.vehicle.brand?.trim() ?? '', model = i.vehicle.model?.trim() ?? '', color = i.vehicle.color?.trim() ?? '';
+        // un vehículo ya registrado solo se completa: lo que no se capturó ahora no borra lo que ya tenía
+        const patch = { ...(brand ? { brand } : {}), ...(model ? { model } : {}), ...(color ? { color } : {}), ...(clientId ? { clientId } : {}) };
         vehicle = found
-          ? await tx.vehicle.update({ where: { id: found.id }, data: { ...vData, updatedById: i.userId } })
-          : await tx.vehicle.create({ data: { ...vData, plate, tenantId: i.tenantId, createdById: i.userId } });
+          ? await tx.vehicle.update({ where: { id: found.id }, data: { ...patch, updatedById: i.userId } })
+          : await tx.vehicle.create({ data: { brand, model, color, ...(clientId ? { clientId } : {}), plate, tenantId: i.tenantId, createdById: i.userId } });
       }
 
       const order = await tx.washOrder.create({
@@ -201,6 +203,28 @@ export class PrismaOrderRepository extends WashOrderRepository {
       if (!it) throw new Error('item');
       await tx.washOrderItem.update({ where: { id: itemId }, data: { unitPrice, total: Math.round(unitPrice * it.quantity * 100) / 100 } });
       await tx.washOrder.update({ where: { id: orderId }, data: { ...totals, updatedById: userId } });
+    });
+  }
+
+  /**
+   * Cambia o completa el vehículo de una orden. Si la placa es de otro vehículo ya registrado se liga a ese; si es
+   * nueva se registra un vehículo nuevo (no se renombra el anterior: así no se alteran otras órdenes).
+   */
+  async updateVehicle(tenantId: string, orderId: string, userId: string, v: { plate: string; brand: string; model: string; color: string }) {
+    await this.prisma.$transaction(async (tx) => {
+      const o = await tx.washOrder.findFirst({ where: { id: orderId, tenantId, deletedAt: null }, select: { vehicleId: true, clientId: true } });
+      if (!o) throw new Error('NOT_FOUND');
+      const plate = normalizePlate(v.plate);
+      const data = { brand: v.brand.trim(), model: v.model.trim(), color: v.color.trim() };
+      const same = await tx.vehicle.findFirst({ where: { tenantId, plate, deletedAt: null } });
+      let vehicleId: string;
+      if (same) {
+        await tx.vehicle.update({ where: { id: same.id }, data: { ...data, ...(!same.clientId && o.clientId ? { clientId: o.clientId } : {}), updatedById: userId } });
+        vehicleId = same.id;
+      } else {
+        vehicleId = (await tx.vehicle.create({ data: { ...data, plate, tenantId, clientId: o.clientId, createdById: userId } })).id;
+      }
+      if (vehicleId !== o.vehicleId) await tx.washOrder.update({ where: { id: orderId }, data: { vehicleId, updatedById: userId } });
     });
   }
 

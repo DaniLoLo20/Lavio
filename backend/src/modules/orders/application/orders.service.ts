@@ -44,7 +44,8 @@ export class OrdersService {
       return { serviceId: s.id, name: s.name, unitPrice, quantity: i.quantity, total: Math.round(unitPrice * i.quantity * 100) / 100 };
     });
     // La placa solo es obligatoria si algún servicio de la orden la pide (los «sin vehículo» se venden solo con nombre/teléfono)
-    if (!dto.vehicle && services.some((s) => s.requiresVehicle)) throw new BadRequestException('Este servicio pide placa y datos del vehículo');
+    // Se identifica por placa o por el nombre del cliente (basta uno). Los servicios «sin vehículo» no piden nada.
+    if (!dto.vehicle && !dto.client?.name?.trim() && !dto.client?.id && services.some((s) => s.requiresVehicle)) throw new BadRequestException('Indica la placa o el nombre del cliente');
     const totals = computeTotals(lines, dto.discount ?? 0, settings.taxRate);
     const c = dto.client;
     const hasClient = !!(c && (c.name || c.phone || c.email));
@@ -54,7 +55,7 @@ export class OrdersService {
       id: dto.id,
       code: dto.code,
       receivedAt: clampTime(dto.createdAt),
-      vehicle: dto.vehicle ? { ...dto.vehicle, plate: normalizePlate(dto.vehicle.plate) } : null,
+      vehicle: dto.vehicle ? { plate: normalizePlate(dto.vehicle.plate), brand: dto.vehicle.brand ?? '', model: dto.vehicle.model ?? '', color: dto.vehicle.color ?? '' } : null,
       client: hasClient ? c! : null,
       notes: dto.notes,
       assignedToId: dto.assignedToId,
@@ -176,6 +177,14 @@ export class OrdersService {
     const due = Math.round((Number(o.total) - paid) * 100) / 100;
     if (amount > due + 0.005) throw new BadRequestException(`El monto excede el saldo pendiente ($${due.toFixed(2)})`);
     await this.repo.addPayment(user.tenantId, id, user.sub, { method: dto.method, amount, reference: dto.reference });
+    return this.get(user, id);
+  }
+
+  /** Corrige o agrega el vehículo de una orden (requiere orders:edit). */
+  async changeVehicle(user: AuthUser, id: string, v: { plate: string; brand?: string; model?: string; color?: string }) {
+    await this.load(user, id);
+    if (normalizePlate(v.plate).length < 3) throw new BadRequestException('Placa inválida');
+    await this.repo.updateVehicle(user.tenantId, id, user.sub, { plate: v.plate, brand: v.brand ?? '', model: v.model ?? '', color: v.color ?? '' });
     return this.get(user, id);
   }
 

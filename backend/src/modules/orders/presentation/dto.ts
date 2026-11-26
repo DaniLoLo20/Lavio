@@ -4,9 +4,10 @@ import { ContactPreference, PaymentMethod } from '@prisma/client';
 
 export class VehicleDto {
   @IsString() @MinLength(3) @MaxLength(12) plate: string;
-  @IsString() @MinLength(1) brand: string;
-  @IsString() @MinLength(1) model: string;
-  @IsString() @MinLength(1) color: string;
+  // marca, modelo y color son opcionales: la placa basta para identificar el vehículo
+  @IsOptional() @IsString() @MaxLength(60) brand?: string;
+  @IsOptional() @IsString() @MaxLength(60) model?: string;
+  @IsOptional() @IsString() @MaxLength(40) color?: string;
 }
 
 export class ClientInputDto {
@@ -69,4 +70,12 @@ export class ArchiveDto {
 
 export class DeleteOrdersDto {
   @IsArray() @ArrayMinSize(1) @IsUUID('all', { each: true }) ids: string[];
+}
+
+/** Corregir o completar el vehículo de una orden ya creada. */
+export class EditVehicleDto {
+  @IsString() @MinLength(3) @MaxLength(12) plate: string;
+  @IsOptional() @IsString() @MaxLength(60) brand?: string;
+  @IsOptional() @IsString() @MaxLength(60) model?: string;
+  @IsOptional() @IsString() @MaxLength(40) color?: string;
 }

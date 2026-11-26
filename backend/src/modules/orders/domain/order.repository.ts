@@ -46,6 +46,7 @@ export abstract class WashOrderRepository {
   abstract addPhoto(tenantId: string, orderId: string, userId: string, type: string, path: string, opts?: { id?: string; takenAt?: Date }): Promise<any>;
   abstract addPayment(tenantId: string, orderId: string, userId: string, p: { method: string; amount: number; reference?: string }): Promise<any>;
   abstract updateItemPrice(tenantId: string, orderId: string, itemId: string, userId: string, unitPrice: number, totals: { subtotal: number; discount: number; taxRate: number; taxAmount: number; total: number }): Promise<void>;
+  abstract updateVehicle(tenantId: string, orderId: string, userId: string, v: { plate: string; brand: string; model: string; color: string }): Promise<void>;
   abstract softDelete(tenantId: string, ids: string[], userId: string): Promise<number>;
   abstract setArchived(tenantId: string, ids: string[], archived: boolean, userId: string): Promise<number>;
   abstract washerBelongsToTenant(tenantId: string, userId: string): Promise<boolean>;
