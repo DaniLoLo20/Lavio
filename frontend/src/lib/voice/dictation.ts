@@ -226,12 +226,8 @@ export function parseDictation(
 /** ehicle = false cuando los servicios dictados no piden vehículo (se vende solo con nombre/teléfono). */
 export function missingOf(d: DictDraft, vehicle = true): string[] {
   const out: string[] = [];
-  if (vehicle) {
-    if (d.plate.length < 3) out.push('placa');
-    if (!d.brand) out.push('marca');
-    if (!d.model) out.push('modelo');
-    if (!d.color) out.push('color');
-  }
+  // basta la placa o el nombre del cliente; marca, modelo y color son opcionales
+  if (vehicle && d.plate.length < 3 && d.name.trim().length < 2) out.push('placa o nombre');
   if (!Object.values(d.items).some((q) => q > 0)) out.push('servicio');
   return out;
 }

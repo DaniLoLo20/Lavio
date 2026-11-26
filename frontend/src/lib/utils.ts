@@ -49,9 +49,16 @@ export const PHOTO_TYPES = [
 
 export const METHODS: Record<string, string> = { CASH: 'Efectivo', CARD: 'Tarjeta', TRANSFER: 'Transferencia' };
 
-/** Órdenes de servicios/productos «sin vehículo»: no tienen placa. */
+/** ¿La orden tiene vehículo (placa)? Las de productos o las identificadas solo por nombre no tienen. */
 export const hasVehicle = (o: any) => !!o?.vehicle?.plate;
-/** «Nissan Versa» o «Venta sin vehículo». */
-export const vehicleName = (o: any) => (hasVehicle(o) ? ` `.trim() : 'Venta sin vehículo');
+/** «Nissan Versa» (vacío si no se capturó). */
+export const vehicleText = (o: any) => [o?.vehicle?.brand, o?.vehicle?.model].filter(Boolean).join(' ');
+export const clientOf = (o: any): string => o?.client?.name || o?.clientName || '';
+/** Cómo se identifica la orden: la placa o, si no tiene, el nombre del cliente. */
+export const orderTitle = (o: any) => (hasVehicle(o) ? o.vehicle.plate : clientOf(o) || 'Venta sin vehículo');
+/** El otro dato: si el título es la placa, el vehículo y el cliente; si es el cliente, «Sin vehículo». */
+export const orderSubtitle = (o: any) => (hasVehicle(o) ? [vehicleText(o), clientOf(o)].filter(Boolean).join(' · ') || 'Sin datos del vehículo' : 'Sin vehículo');
+/** Compatibilidad: texto del vehículo, o el cliente si la orden no tiene vehículo. */
+export const vehicleName = (o: any) => (hasVehicle(o) ? vehicleText(o) || o.vehicle.plate : clientOf(o) || 'Venta sin vehículo');
 /** Placa o un guion. */
 export const plateOf = (o: any) => o?.vehicle?.plate || '—';

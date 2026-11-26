@@ -36,8 +36,8 @@ export default function TrackPage() {
       <div className="flex items-center justify-center gap-2 pt-1"><TenantMark url={o.logoUrl} size={o.logoUrl ? 48 : 32} />{o.logoUrl ? <span className="text-lg font-bold">{o.business}</span> : <span className="brand-text text-lg font-bold">{BRAND.name}</span>}</div>
       <div className="pt-2 text-center">
         <p className="text-sm text-muted-foreground">{o.logoUrl ? o.business : ""}</p>
-        <h1 className="text-2xl font-semibold">{o.vehicle.plate ? `${o.vehicle.brand} ${o.vehicle.model}` : 'Tu pedido'}</h1>
-        <p className="text-sm text-muted-foreground">{o.vehicle.plate ? `${o.vehicle.color} · ${o.vehicle.plate} · ` : ''}Folio {o.folio}</p>
+        <h1 className="text-2xl font-semibold">{[o.vehicle.brand, o.vehicle.model].filter(Boolean).join(' ') || (o.vehicle.plate ? 'Tu vehículo' : 'Tu pedido')}</h1>
+        <p className="text-sm text-muted-foreground">{o.vehicle.plate ? `${[o.vehicle.color, o.vehicle.plate].filter(Boolean).join(' · ')} · ` : ''}Folio {o.folio}</p>
         <div className="mt-3"><StatusBadge status={o.status as Status} /></div>
       </div>
 

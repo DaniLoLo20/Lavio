@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
-import { Banknote, Camera, ChevronDown, CreditCard, Landmark, Mic, Minus, Plus, Search, Trash2, X, Clock } from 'lucide-react';
+import { Banknote, Camera, ChevronDown, CreditCard, Landmark, Mic, Minus, Plus, Search, Trash2, X, Clock, Car, UserRound } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useOnline } from '@/lib/net';
 import { getDb } from '@/lib/offline/db';
@@ -19,6 +19,7 @@ import { VoiceFab, VoiceMode, type VoiceDraft } from '@/components/voice-mode';
 import { ClientSuggest, SelectedClientNote } from '@/components/client-suggest';
 import { TipField, sendTip } from '@/components/tips';
 import { CarArt, ProductArt } from '@/components/car-art';
+import { ColorField, VehicleField, joinVehicle, splitVehicle } from '@/components/vehicle-field';
 import { GlassPage } from '@/components/glass';
 import { Portal } from '@/components/portal';
 import { findByPlate, useClientIndex, type ClientLite } from '@/lib/clients';
@@ -87,6 +88,12 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
   const clients = useClientIndex();
   const picked = clients.find((x) => x.id === clientId);
   const [showClient, setShowClient] = useState(false);
+  /** Cómo se identifica la orden: por placa o por el nombre del cliente (se recuerda la última elección). */
+  const [idMode, setIdMode] = useState<'plate' | 'name'>(() => { try { return localStorage.getItem('al_pos_id_mode') === 'name' ? 'name' : 'plate'; } catch { return 'plate'; } });
+  const changeMode = (m: 'plate' | 'name') => { setIdMode(m); try { localStorage.setItem('al_pos_id_mode', m); } catch { /* sin storage */ } };
+  /** Campo único «Vehículo» (marca y modelo juntos). Se sincroniza cuando otro lado llena marca/modelo (foto, voz, cliente). */
+  const [vehText, setVehText] = useState('');
+  const vehEditing = useRef(false);
   const [notes, setNotes] = useState('');
   const [washer, setWasher] = useState('');
   const [method, setMethod] = useState(cashMode ? 'CASH' : 'LATER'); // Nueva orden: «Cobrar después» por defecto
@@ -183,7 +190,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
     setSaveError('');
     try {
       await persist({
-        vehicle: needVehicle ? v : null,
+        vehicle: needVehicle && v.plate.trim().length >= 3 ? (vehEditing.current ? { ...v, ...(({ brand, model }) => ({ brand, model }))(splitVehicle(vehText, catalog.data ?? [])) } : v) : null,
         client: { id: clientId, name: c.name || undefined, phone: c.phone || undefined, email: c.email || undefined, contactPreference: c.contactPreference },
         notes,
         items: lines.map((l) => ({ id: l.id, qty: qty[l.id] })),
@@ -203,7 +210,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
   async function saveVoice(d: VoiceDraft, o?: { silent?: boolean }) {
     await persist({
       // sin placa y con servicios que no la piden = venta sin vehículo
-      vehicle: d.plate.trim() || Object.keys(d.items).some((id) => all.find((s) => s.id === id)?.requiresVehicle !== false) ? { plate: d.plate, brand: d.brand, model: d.model, color: d.color } : null,
+      vehicle: d.plate.trim().length >= 3 ? { plate: d.plate, brand: d.brand, model: d.model, color: d.color } : null,
       client: { id: d.clientId, name: d.name || undefined, phone: d.phone || undefined, contactPreference: d.phone ? 'WHATSAPP' : 'NONE' },
       notes: d.notes,
       items: Object.entries(d.items).filter(([, q]) => q > 0).map(([id, q]) => ({ id, qty: q })),
@@ -286,7 +293,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
       const hit = n.plate ? findByPlate(clients, n.plate) : undefined;
       if (hit && !clientId && !c.name && !c.phone) pickClient({ ...hit.client, vehicles: [] });
       setScanFound(found);
-      const still = ([!n.plate.trim() && 'placa', !n.brand.trim() && 'marca', !n.model.trim() && 'modelo', !n.color.trim() && 'color'].filter(Boolean)) as FillField[];
+      const still = ([!n.plate.trim() && 'placa', !n.brand.trim() && 'marca', !n.model.trim() && 'modelo'].filter(Boolean)) as FillField[]; // el color es opcional: no se pregunta
       setVoiceFill(still.length ? { k: Date.now(), missing: still } : null);
       const missing = [!r.plate && 'placa', !r.brand && 'marca', !r.model && 'modelo', !r.color && 'color'].filter(Boolean);
       setOcrMsg(r.ocrError ?? (found.length ? `Detectado: ${found.join(' · ')}.${missing.length ? ` No se leyó: ${missing.join(', ')}.` : ''} Verifícalo.` : 'No se pudo leer la foto. Captura los datos a mano.'));
@@ -317,33 +324,125 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
     setV((p) => ({ ...p, brand: text, model: resolveBrand(text) === resolveBrand(p.brand) ? p.model : '' }));
   const COLORS = ['Blanco', 'Negro', 'Gris', 'Plata', 'Rojo', 'Azul', 'Verde', 'Amarillo', 'Naranja', 'Café', 'Beige', 'Dorado', 'Vino', 'Morado'];
 
+  useEffect(() => { if (!vehEditing.current) setVehText(joinVehicle(v.brand, v.model)); }, [v.brand, v.model]);
+
   /** ¿Algún servicio elegido pide vehículo? Si ninguno (productos, lavado de tapetes…), se vende solo con nombre y teléfono. */
   const needVehicle = lines.length === 0 || lines.some((l) => l.requiresVehicle !== false);
-  const validVehicle = !needVehicle || !!(v.plate.trim().length >= 3 && v.brand.trim() && v.model.trim() && v.color.trim());
+  // basta la placa o el nombre del cliente; marca, modelo y color son opcionales
+  const validVehicle = !needVehicle || v.plate.trim().length >= 3 || c.name.trim().length >= 2;
 
   const Root: any = cashMode ? 'div' : GlassPage;
-  const missing = !needVehicle ? [] : [v.plate.trim().length < 3 && 'placa', !v.brand.trim() && 'marca', !v.model.trim() && 'modelo', !v.color.trim() && 'color'].filter(Boolean) as string[];
-  const clientGroup = (
-      <Group title={needVehicle ? 'Cliente y observaciones' : 'Cliente'} right={!needVehicle ? <span className="text-[11px] font-medium text-violet-600">Venta sin vehículo</span> : <button type="button" onClick={() => setShowClient(!showClient)} className="flex items-center gap-1 text-xs font-medium text-primary">{showClient ? 'Ocultar' : 'Agregar'}<ChevronDown className={cn('h-4 w-4 transition', showClient && 'rotate-180')} /></button>}>
-        {!showClient && needVehicle ? (
-          <button type="button" onClick={() => setShowClient(true)} className="w-full text-left text-sm text-muted-foreground">{c.name || c.phone ? [c.name, c.phone].filter(Boolean).join(' · ') : 'Opcional: nombre, teléfono para avisarle, notas'}</button>
-        ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="sm:col-span-2"><SelectedClientNote client={picked} onClear={() => setClientId(undefined)} /></div>
-            <div><Label className="text-xs">Nombre</Label><Input value={c.name} autoComplete="off" onChange={(e) => { setClientId(undefined); setC({ ...c, name: e.target.value }); }} className="rounded-2xl" /><ClientSuggest clients={clients} query={c.name} selectedId={clientId} onPick={pickClient} /></div>
-            <div><Label className="text-xs">Teléfono</Label><Input type="tel" inputMode="tel" autoComplete="off" value={c.phone} onChange={(e) => { setClientId(undefined); setC({ ...c, phone: e.target.value }); }} placeholder="10 dígitos" className="rounded-2xl" /><ClientSuggest clients={clients} query={c.phone} selectedId={clientId} onPick={pickClient} /></div>
-            <div><Label className="text-xs">Correo</Label><Input type="email" value={c.email} onChange={(e) => setC({ ...c, email: e.target.value })} className="rounded-2xl" /></div>
-            <div><Label className="text-xs">Avisarle por</Label>
-              <Select value={c.contactPreference} onChange={(e) => setC({ ...c, contactPreference: e.target.value })} className="rounded-2xl">
-                <option value="NONE">Ninguno</option><option value="WHATSAPP">WhatsApp</option><option value="EMAIL">Correo</option>
-              </Select>
-            </div>
-            <div className="sm:col-span-2"><Label className="text-xs">Observaciones</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Rayones, objetos de valor, etc." className="rounded-2xl" /></div>
-          </div>
-        )}
-      </Group>
+  const missing = validVehicle ? [] : [idMode === 'plate' ? 'la placa (o cambia a «Nombre»)' : 'el nombre del cliente (o cambia a «Placa»)'];
+  const clientFields = (
+    <>
+      <div><Label className="text-xs">Nombre</Label><Input aria-label="Nombre" value={c.name} autoComplete="off" onChange={(e) => { setClientId(undefined); setC({ ...c, name: e.target.value }); }} className="rounded-2xl" /><ClientSuggest clients={clients} query={c.name} selectedId={clientId} onPick={pickClient} /></div>
+      <div><Label className="text-xs">Teléfono</Label><Input aria-label="Teléfono" type="tel" inputMode="tel" autoComplete="off" value={c.phone} onChange={(e) => { setClientId(undefined); setC({ ...c, phone: e.target.value }); }} placeholder="10 dígitos" className="rounded-2xl" /><ClientSuggest clients={clients} query={c.phone} selectedId={clientId} onPick={pickClient} /></div>
+    </>
   );
-  const checkoutForm = (
+  const moreFields = (
+    <>
+      <div><Label className="text-xs">Correo</Label><Input type="email" value={c.email} onChange={(e) => setC({ ...c, email: e.target.value })} className="rounded-2xl" /></div>
+      <div><Label className="text-xs">Avisarle por</Label>
+        <Select value={c.contactPreference} onChange={(e) => setC({ ...c, contactPreference: e.target.value })} className="rounded-2xl">
+          <option value="NONE">Ninguno</option><option value="WHATSAPP">WhatsApp</option><option value="EMAIL">Correo</option>
+        </Select>
+      </div>
+      <div className="sm:col-span-2"><Label className="text-xs">Observaciones</Label><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Rayones, objetos de valor, etc." className="rounded-2xl" /></div>
+    </>
+  );
+  /** Venta de productos/servicios que no piden vehículo: solo cliente (opcional). */
+  const clientGroup = (
+    <Group title="Cliente" right={<span className="text-[11px] font-medium text-violet-600">Venta sin vehículo</span>}>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="sm:col-span-2"><SelectedClientNote client={picked} onClear={() => setClientId(undefined)} /></div>
+        {clientFields}
+        {moreFields}
+      </div>
+    </Group>
+  );
+  /** Placa (+ foto trasera), vehículo en un solo campo y color: todo opcional salvo la placa cuando se identifica por placa. */
+  const plateBlock = (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <Input aria-label="Placa" autoFocus={idMode === 'plate' && typeof window !== 'undefined' && window.innerWidth >= 640} value={v.plate} onChange={(e) => onPlate(e.target.value.toUpperCase())} placeholder="ABC123" className="h-14 min-w-0 flex-1 rounded-2xl text-center font-mono text-2xl uppercase tracking-[0.2em]" />
+        <button type="button" onClick={() => fileRef.current?.click()} disabled={ocrBusy} aria-label="Tomar foto trasera"
+          className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl bg-primary text-primary-foreground shadow transition active:scale-95 disabled:opacity-60">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {rear && <img src={rear.url} alt="Foto trasera" className="absolute inset-0 h-full w-full object-cover opacity-70" />}
+          {ocrBusy ? <span className="relative h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" /> : <Camera className="relative h-6 w-6 drop-shadow" />}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
+      </div>
+      <p className="text-xs text-muted-foreground" data-testid="scan-msg">{ocrMsg || 'Con la cámara tomas la foto trasera: detecta placa, vehículo y color.'}</p>
+      {voiceFill && (
+        <VoiceFill key={voiceFill.k} missing={voiceFill.missing} catalog={catalog.data ?? []} onClose={() => setVoiceFill(null)}
+          onFill={(f) => setV((p) => ({ ...p, ...(f.plate && !p.plate.trim() ? { plate: f.plate } : {}), ...(f.brand && !p.brand.trim() ? { brand: f.brand } : {}), ...(f.model && !p.model.trim() ? { model: f.model } : {}), ...(f.color && !p.color.trim() ? { color: f.color } : {}) }))} />
+      )}
+      {scanFound.length > 0 && <div className="flex flex-wrap gap-1.5">{scanFound.map((f) => <span key={f} className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">✓ {f}</span>)}</div>}
+      <div>
+        <Label className="text-xs">Vehículo <span className="font-normal text-muted-foreground">(opcional)</span></Label>
+        <VehicleField value={vehText} catalog={catalog.data ?? []}
+          onChange={(text) => { vehEditing.current = true; setVehText(text); }}
+          onCommit={(pv) => { vehEditing.current = false; setV((p) => ({ ...p, brand: pv.brand, model: pv.model, color: p.color || pv.color })); }} />
+      </div>
+      <div>
+        <Label className="text-xs">Color <span className="font-normal text-muted-foreground">(opcional)</span></Label>
+        <ColorField value={v.color} onChange={(col) => setV((p) => ({ ...p, color: col }))} />
+      </div>
+    </div>
+  );
+  const nameBlock = (
+    <div className="space-y-2">
+      <div>
+        <Input aria-label="Nombre del cliente" autoFocus={idMode === 'name' && typeof window !== 'undefined' && window.innerWidth >= 640} value={c.name} autoComplete="off" placeholder="Nombre del cliente"
+          onChange={(e) => { setClientId(undefined); setC({ ...c, name: e.target.value }); }} className="h-14 rounded-2xl text-center text-xl font-semibold" />
+        <ClientSuggest clients={clients} query={c.name} selectedId={clientId} onPick={pickClient} />
+      </div>
+      <div>
+        <Input aria-label="Teléfono" type="tel" inputMode="tel" autoComplete="off" value={c.phone} placeholder="Teléfono (opcional, para avisarle)" onChange={(e) => { setClientId(undefined); setC({ ...c, phone: e.target.value }); }} className="rounded-2xl" />
+        <ClientSuggest clients={clients} query={c.phone} selectedId={clientId} onPick={pickClient} />
+      </div>
+      <SelectedClientNote client={picked} onClear={() => setClientId(undefined)} />
+    </div>
+  );
+  /** Identificador de la orden: el empleado elige Placa o Nombre (basta uno). */
+  const idGroup = (
+    <Group title="Identificar la orden" right={picked ? <span className="text-[11px] font-medium text-emerald-600">Cliente registrado</span> : undefined}>
+      <div className="space-y-3">
+        <div role="radiogroup" aria-label="Identificar por" className="grid grid-cols-2 gap-1 rounded-2xl bg-black/5 p-1 dark:bg-white/10">
+          {([['plate', 'Placa', Car], ['name', 'Nombre', UserRound]] as const).map(([k, label, Icon]) => (
+            <button key={k} type="button" role="radio" aria-checked={idMode === k} onClick={() => changeMode(k)}
+              className={cn('flex h-10 items-center justify-center gap-2 rounded-xl text-sm font-semibold transition active:scale-95', idMode === k ? 'bg-white text-foreground shadow-sm dark:bg-white/20' : 'text-muted-foreground')}>
+              <Icon className="h-4 w-4" />{label}
+            </button>
+          ))}
+        </div>
+        {idMode === 'plate' ? plateBlock : nameBlock}
+      </div>
+    </Group>
+  );
+  const extraSummary = idMode === 'plate' ? [c.name, c.phone].filter(Boolean).join(' · ') : [v.plate, joinVehicle(v.brand, v.model), v.color].filter(Boolean).join(' · ');
+  /** Lo que no se usó para identificar la orden, plegado: cliente (si fue por placa) o vehículo (si fue por nombre). */
+  const extraGroup = (
+    <Group title={idMode === 'plate' ? 'Cliente y observaciones' : 'Vehículo y observaciones'}
+      right={<button type="button" onClick={() => setShowClient(!showClient)} className="flex items-center gap-1 text-xs font-medium text-primary">{showClient ? 'Ocultar' : 'Agregar'}<ChevronDown className={cn('h-4 w-4 transition', showClient && 'rotate-180')} /></button>}>
+      {!showClient ? (
+        <button type="button" onClick={() => setShowClient(true)} className="w-full text-left text-sm text-muted-foreground" data-testid="extra-summary">
+          {extraSummary || (idMode === 'plate' ? 'Opcional: nombre, teléfono para avisarle, notas' : 'Opcional: placa, vehículo, color, notas')}
+        </button>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {idMode === 'plate' ? (
+            <>
+              <div className="sm:col-span-2"><SelectedClientNote client={picked} onClear={() => setClientId(undefined)} /></div>
+              {clientFields}
+            </>
+          ) : <div className="sm:col-span-2">{plateBlock}</div>}
+          {moreFields}
+        </div>
+      )}
+    </Group>
+  );  const checkoutForm = (
     <form id="checkout-form" className="space-y-4 p-4" onSubmit={(e) => { e.preventDefault(); if (validVehicle) void submitOrder(); }}>
       <Group title="Servicios">
         <div className="divide-y divide-black/5 dark:divide-white/10">
@@ -373,64 +472,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
         )}
       </Group>
 
-      {needVehicle && (
-      <Group title="Vehículo" right={picked ? <span className="text-[11px] font-medium text-emerald-600">Cliente registrado</span> : undefined}>
-        <div className="space-y-3">
-          <button type="button" onClick={() => fileRef.current?.click()} disabled={ocrBusy} aria-label="Tomar foto trasera"
-            className="flex w-full items-center gap-3 rounded-2xl border border-dashed border-primary/40 bg-primary/5 p-2.5 text-left transition active:scale-[0.99] disabled:opacity-60">
-            {rear ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={rear.url} alt="Foto trasera" className="h-14 w-20 shrink-0 rounded-xl object-cover" />
-            ) : <span className="grid h-14 w-20 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground"><Camera className="h-6 w-6" /></span>}
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold">{ocrBusy ? 'Analizando foto…' : rear ? 'Cambiar foto trasera' : 'Tomar foto trasera'}</span>
-              <span className="block text-xs text-muted-foreground">{ocrMsg || 'Detecta placa, marca, modelo y color, y se guarda en la orden'}</span>
-            </span>
-            {ocrBusy && <span className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-primary border-t-transparent" />}
-          </button>
-          {voiceFill && (
-            <VoiceFill key={voiceFill.k} missing={voiceFill.missing} catalog={catalog.data ?? []} onClose={() => setVoiceFill(null)}
-              onFill={(f) => setV((p) => ({ ...p, ...(f.plate && !p.plate.trim() ? { plate: f.plate } : {}), ...(f.brand && !p.brand.trim() ? { brand: f.brand } : {}), ...(f.model && !p.model.trim() ? { model: f.model } : {}), ...(f.color && !p.color.trim() ? { color: f.color } : {}) }))} />
-          )}
-          {scanFound.length > 0 && <div className="flex flex-wrap gap-1.5">{scanFound.map((f) => <span key={f} className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">✓ {f}</span>)}</div>}
-          <div className="relative">
-            <Input aria-label="Placa" autoFocus={typeof window !== 'undefined' && window.innerWidth >= 640} value={v.plate} onChange={(e) => onPlate(e.target.value.toUpperCase())} placeholder="ABC123" className="h-14 rounded-2xl text-center font-mono text-2xl uppercase tracking-[0.2em]" />
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => e.target.files?.[0] && runOcr(e.target.files[0])} />
-
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label className="text-xs">Marca *</Label>
-              <Combobox
-                value={v.brand}
-                placeholder="Ej. VW, Nissan"
-                options={brandNames}
-                match={brandMatch}
-                onChange={changeBrand}
-                onPick={(b) => setV((p) => ({ ...p, brand: b, model: '' }))}
-                onBlurValue={(t) => { const b = resolveBrand(t); if (b && b !== v.brand) setV((p) => ({ ...p, brand: b, model: b === resolveBrand(p.brand) ? p.model : '' })); }}
-              />
-            </div>
-            <div>
-              <Label className="text-xs">Modelo *</Label>
-              <Combobox value={v.model} placeholder={currentBrand ? `Modelos de ${currentBrand.brand}` : 'Elija la marca'} options={brandModels} onChange={(t) => setV({ ...v, model: t })} />
-            </div>
-          </div>
-          <div>
-            <Label className="text-xs">Color *</Label>
-            <div className="mb-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Color rápido">
-              {Object.entries(SWATCH).map(([name, hex]) => (
-                <button key={name} type="button" role="radio" aria-checked={v.color === name} aria-label={name} title={name} onClick={() => setV({ ...v, color: name })}
-                  className={cn('h-8 w-8 rounded-full border border-black/15 shadow-sm transition active:scale-90', v.color === name && 'ring-2 ring-primary ring-offset-2 ring-offset-white dark:ring-offset-slate-900')} style={{ background: hex }} />
-              ))}
-            </div>
-            <Combobox value={v.color} placeholder="Otro color" options={COLORS} onChange={(t) => setV({ ...v, color: t })} />
-          </div>
-        </div>
-      </Group>
-      )}
-
-      {!needVehicle && clientGroup}
+      {needVehicle ? idGroup : clientGroup}
 
       <Group title="Cobro">
         <div className="space-y-3">
@@ -459,7 +501,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
         </div>
       </Group>
 
-      {needVehicle && clientGroup}
+      {needVehicle && extraGroup}
 
       <Group title="Resumen">
         <div className="space-y-1.5 text-sm">
@@ -596,8 +638,9 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
         const o = qc.getQueryData<any>(['order', done.id]) ?? done.order;
         const trackUrl = `${location.origin}/track/${done.code}`;
         return (
-          <Modal title="Orden creada">
+          <Modal title={cashMode ? 'Venta registrada' : 'Orden creada'} onClose={reset}>
             <div className="space-y-4 p-4 sm:p-6">
+              <Button size="lg" className="h-14 w-full rounded-2xl text-lg shadow-lg" onClick={reset}><Plus className="h-5 w-5" />{cashMode ? 'Nueva venta' : 'Nueva orden'}</Button>
               <div className="text-center">
                 <p className="text-sm text-muted-foreground">Folio</p>
                 <p className="text-3xl font-semibold">{o?.folio ?? done.folio ?? 'Por asignar'}</p>
@@ -619,8 +662,7 @@ export function PosRegister({ cashMode = false }: { cashMode?: boolean }) {
                 </div>
               )}
               <div className="flex flex-col gap-2 sm:flex-row">
-                <Link href={`/orders/detail?id=${done.id}`} className={cn(buttonClass('default'), 'flex-1')}>Abrir orden y tomar fotos</Link>
-                <Button variant="outline" className="flex-1" onClick={reset}>Nueva orden</Button>
+                <Link href={`/orders/detail?id=${done.id}`} className={cn(buttonClass('outline'), 'flex-1 rounded-2xl')}>Abrir orden y tomar fotos</Link>
               </div>
             </div>
           </Modal>

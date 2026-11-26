@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { STATUS, STATUS_ORDER, dateTime, money, vehicleName } from '@/lib/utils';
+import { STATUS, STATUS_ORDER, dateTime, money, vehicleName, orderTitle, vehicleText, hasVehicle } from '@/lib/utils';
 import { Badge, Card, Empty, Input, PageHeader, Select, StatusBadge } from '@/components/ui';
 import { CompanySelect } from '@/components/company-filter';
 
@@ -35,7 +35,7 @@ export default function PlatformOrders() {
         {q.data?.map((o) => (
           <div key={o.id} className="flex items-center justify-between gap-3 p-4">
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{o.folio} · {vehicleName(o)} <span className="font-mono text-muted-foreground">{o.vehicle?.plate}</span></p>
+              <p className="truncate text-sm font-medium">{o.folio} · <span className="font-mono">{orderTitle(o)}</span> <span className="text-muted-foreground">{hasVehicle(o) ? vehicleText(o) : ''}</span></p>
               <p className="truncate text-xs text-muted-foreground"><Badge className="mr-1 bg-primary/10 text-primary">{o.tenant.name}</Badge>{dateTime(o.receivedAt)} · {o.client?.name ?? 'Sin cliente'} · {o.assignedTo?.fullName ?? 'Sin asignar'}</p>
             </div>
             <div className="flex shrink-0 items-center gap-3">

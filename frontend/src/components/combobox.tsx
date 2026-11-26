@@ -15,10 +15,12 @@ interface Props {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  ariaLabel?: string;
+  inputClassName?: string;
 }
 
 /** Campo de texto con lista desplegable filtrada. Permite texto libre si no hay coincidencia. */
-export function Combobox({ value, onChange, onPick, onBlurValue, options, match, placeholder, disabled, className }: Props) {
+export function Combobox({ value, onChange, onPick, onBlurValue, options, match, placeholder, disabled, className, ariaLabel, inputClassName }: Props) {
   const [open, setOpen] = useState(false);
   const q = value.trim().toLowerCase();
   const test = match ?? ((o: string, query: string) => o.toLowerCase().includes(query));
@@ -28,6 +30,8 @@ export function Combobox({ value, onChange, onPick, onBlurValue, options, match,
     <div className={cn('relative', className)}>
       <Input
         value={value}
+        aria-label={ariaLabel}
+        className={inputClassName}
         placeholder={placeholder}
         disabled={disabled}
         autoComplete="off"

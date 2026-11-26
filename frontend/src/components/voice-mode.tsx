@@ -27,8 +27,8 @@ export const emptyDraft: VoiceDraft = { plate: '', brand: '', model: '', color: 
 
 const STEPS = [
   { key: 'service', title: 'Servicio', prompt: '¿Qué servicio desea?', example: 'Di: "lavado básico y aspirado"', optional: false },
-  { key: 'plate', title: 'Placa', prompt: '¿Cuál es la placa del vehículo?', example: 'Di: "A B C uno dos tres"', optional: false },
-  { key: 'vehicle', title: 'Vehículo', prompt: 'Dime la marca, el modelo y el color del vehículo.', example: 'Di: "Nissan Versa gris" o "Volkswagen Vento rojo"', optional: false },
+  { key: 'plate', title: 'Placa', prompt: '¿Cuál es la placa? (o di «saltar» para usar el nombre del cliente)', example: 'Di: "A B C uno dos tres" o "saltar"', optional: true },
+  { key: 'vehicle', title: 'Vehículo', prompt: '¿Qué vehículo es?', example: 'Di: "Versa gris", "Jetta" o "saltar"', optional: true },
   { key: 'name', title: 'Nombre', prompt: '¿Cómo se llama el cliente?', example: 'Di el nombre, o "saltar"', optional: true },
   { key: 'phone', title: 'Teléfono', prompt: '¿Cuál es su teléfono?', example: 'Di los diez dígitos, o "saltar"', optional: true },
   { key: 'notes', title: 'Observaciones', prompt: '¿Alguna observación del vehículo?', example: 'Di "ninguna" si no hay', optional: true },
@@ -127,12 +127,8 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
     const tax = (subtotal * taxRate) / 100;
     const total = Math.round((subtotal + tax) * 100) / 100;
     const missing: string[] = [];
-    if (needsVehicle(d)) {
-      if (d.plate.length < 3) missing.push('la placa');
-      if (!d.brand.trim()) missing.push('la marca');
-      if (!d.model.trim()) missing.push('el modelo');
-      if (!d.color.trim()) missing.push('el color');
-    }
+    // basta la placa o el nombre del cliente; marca, modelo y color son opcionales
+    if (needsVehicle(d) && d.plate.length < 3 && d.name.trim().length < 2) missing.push('la placa o el nombre del cliente');
     if (!lines.length) missing.push('el servicio');
     return { lines, subtotal, tax, total, missing };
   };
@@ -252,13 +248,9 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
         const cur = draftRef.current;
         const merged = { ...cur, brand: v.brand || cur.brand, model: v.model || cur.model, color: v.color || cur.color };
         setDraft(merged);
-        const missing = [!merged.brand && 'la marca', !merged.model && 'el modelo', !merged.color && 'el color'].filter(Boolean) as string[];
-        if (!missing.length) { schedule(i); break; }
-        setMsg({ tone: 'info', text: `Entendí ${[merged.brand, merged.model, merged.color].filter(Boolean).join(' ') || 'poco'}. Me falta ${listJoin(missing)}.` });
-        if (sRef.current.autoListen && supported && followUps.current < 2) {
-          followUps.current++;
-          void followUp(i, `Me falta ${listJoin(missing)}. Dímelo.`);
-        }
+        // el vehículo y el color son opcionales: si se entendió algo se avanza; el color no se vuelve a preguntar
+        if (merged.brand || merged.model) { schedule(i); break; }
+        setMsg({ tone: 'info', text: 'No entendí el vehículo. Repite o di «saltar».' });
         break;
       }
       case 'name': {
@@ -396,7 +388,7 @@ function GuidedVoiceMode({ open, onClose, services, clients = [], catalog, taxRa
   const c = calc(draft);
   const models = (catalog ?? []).find((b) => b.brand.toLowerCase() === draft.brand.trim().toLowerCase())?.models ?? [];
   const step = idx < STEPS.length ? STEPS[idx] : null;
-  const canNext = !step ? false : step.key === 'plate' ? draft.plate.length >= 3 : step.key === 'vehicle' ? !!(draft.brand && draft.model && draft.color) : step.key === 'service' ? c.lines.length > 0 : true;
+  const canNext = !step ? false : step.key === 'plate' || step.key === 'vehicle' ? true : step.key === 'service' ? c.lines.length > 0 : true;
 
   const VehicleFields = (
     <div className="grid gap-3 sm:grid-cols-3">

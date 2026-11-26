@@ -41,7 +41,7 @@ export function VoiceFill({ missing, catalog, onFill, onClose }: {
   const sRef = useRef(settings); sRef.current = settings;
   const supported = useMemo(() => speechSupported(), []);
   const listener = useRef(createListener()).current;
-  const [left, setLeft] = useState<FillField[]>(missing);
+  const [left, setLeft] = useState<FillField[]>(missing.filter((m) => m !== 'color'));
   const [status, setStatus] = useState<'speaking' | 'listening' | 'idle' | 'done'>('idle');
   const [heard, setHeard] = useState('');
   const [note, setNote] = useState('');
@@ -73,7 +73,9 @@ export function VoiceFill({ missing, catalog, onFill, onClose }: {
   }
 
   useEffect(() => {
-    void ask(missing, 0);
+    const ask0 = missing.filter((m) => m !== 'color');
+    if (!ask0.length) { onClose(); return; }
+    void ask(ask0, 0);
     return () => { run.current++; listener.stop(); cancelSpeech(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -12,6 +12,7 @@ import { Button, ErrorText, Input, Label, Select } from './ui';
 import { Combobox } from './combobox';
 import { COLORS } from '@/lib/voice/parsers';
 import { VoiceSettingsForm } from './voice-settings';
+import { ColorField, VehicleField } from './vehicle-field';
 import { GlassBlobs } from './glass';
 import { Portal } from './portal';
 
@@ -359,10 +360,9 @@ export function DictationMode({ open, onClose, services, clients = [], catalog, 
                       {!saved && e.open && (
                         <div className="mt-3 space-y-3 border-t border-black/5 pt-3 dark:border-white/10">
                           <div className="grid grid-cols-2 gap-2">
-                            <div className="col-span-2"><Label className="text-xs">Placa *</Label><Input aria-label="Placa" value={e.draft.plate} onChange={(ev) => patchDraft(e.id, { plate: ev.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8), clientId: undefined })} className="rounded-2xl font-mono uppercase" /></div>
-                            <div><Label className="text-xs">Marca *</Label><Combobox value={e.draft.brand} options={brands} onChange={(t) => patchDraft(e.id, { brand: t })} /></div>
-                            <div><Label className="text-xs">Modelo *</Label><Combobox value={e.draft.model} options={catalog?.find((b) => b.brand === e.draft.brand)?.models ?? []} onChange={(t) => patchDraft(e.id, { model: t })} /></div>
-                            <div className="col-span-2"><Label className="text-xs">Color *</Label><Combobox value={e.draft.color} options={COLORS} onChange={(t) => patchDraft(e.id, { color: t })} /></div>
+                            <div className="col-span-2"><Label className="text-xs">Placa</Label><Input aria-label="Placa" value={e.draft.plate} onChange={(ev) => patchDraft(e.id, { plate: ev.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8), clientId: undefined })} className="rounded-2xl font-mono uppercase" /></div>
+                            <div className="col-span-2"><Label className="text-xs">Vehículo (opcional)</Label><VehicleField value={[e.draft.brand, e.draft.model].filter(Boolean).join(' ')} catalog={catalog ?? []} onChange={(t) => patchDraft(e.id, { brand: t, model: '' })} onCommit={(pv) => patchDraft(e.id, { brand: pv.brand, model: pv.model, color: e.draft.color || pv.color })} /></div>
+                            <div className="col-span-2"><Label className="text-xs">Color (opcional)</Label><ColorField value={e.draft.color} onChange={(color) => patchDraft(e.id, { color })} /></div>
                             <div><Label className="text-xs">Nombre</Label><Input aria-label="Nombre" value={e.draft.name} onChange={(ev) => patchDraft(e.id, { name: ev.target.value, clientId: undefined })} className="rounded-2xl" /></div>
                             <div><Label className="text-xs">Teléfono</Label><Input aria-label="Teléfono" type="tel" value={e.draft.phone} onChange={(ev) => patchDraft(e.id, { phone: ev.target.value.replace(/\D/g, '').slice(0, 10), clientId: undefined })} className="rounded-2xl" /></div>
                           </div>

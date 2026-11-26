@@ -11,7 +11,7 @@ import { useOnline } from '@/lib/net';
 import { useLocalOrders, usePendingOps } from '@/lib/offline/hooks';
 import { mergeOrderList } from '@/lib/offline/merge';
 import { changeStatusOffline } from '@/lib/offline/sync';
-import { METHODS, STATUS, STATUS_ORDER, cn, dateTime, money, hasVehicle, plateOf, vehicleName } from '@/lib/utils';
+import { METHODS, STATUS, STATUS_ORDER, cn, dateTime, money, hasVehicle, plateOf, vehicleName, clientOf, orderTitle, vehicleText } from '@/lib/utils';
 import { Modal } from '@/components/modal';
 import { Button, Card, Empty, ErrorText, Input, PageHeader, Select, StatusBadge } from '@/components/ui';
 import { DownloadButton } from '@/components/download-button';
@@ -234,11 +234,18 @@ export default function OrdersPage() {
                   <input type="checkbox" aria-label={`Seleccionar ${o.folio ?? plateOf(o)}`} checked={sel.has(o.id)} onChange={() => toggle(o.id)} className="mt-1 h-5 w-5 shrink-0" />
                   <Link href={`/orders/detail?id=${o.id}`} className="min-w-0 flex-1">
                     <p className="flex items-center gap-2 truncate text-sm">
-                      {hasVehicle(o) && <span className="font-mono text-base font-bold">{o.vehicle.plate}</span>}
-                      <span className={cn('truncate', !hasVehicle(o) && 'font-semibold')}>{vehicleName(o)}</span>
+                      {clientOf(o) ? (
+                        <>
+                          <span className="truncate text-base font-bold" data-testid="row-name">{clientOf(o)}</span>
+                          {hasVehicle(o) && <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 font-mono text-sm font-semibold" data-testid="row-plate">{o.vehicle.plate}</span>}
+                        </>
+                      ) : (
+                        <span className={cn('truncate text-base font-bold', hasVehicle(o) && 'font-mono')} data-testid="row-plate">{orderTitle(o)}</span>
+                      )}
+                      {hasVehicle(o) && vehicleText(o) && <span className="truncate text-muted-foreground">{vehicleText(o)}</span>}
                       {o.pending && <CloudOff className="h-3.5 w-3.5 shrink-0 text-sky-600" aria-label="Pendiente de sincronizar" />}
                     </p>
-                    <p className="truncate text-xs text-muted-foreground">{o.folio ?? 'Folio por asignar'} · {o.client?.name ?? 'Sin cliente'} · {dateTime(o.receivedAt)}</p>
+                    <p className="truncate text-xs text-muted-foreground">{o.folio ?? 'Folio por asignar'}{!hasVehicle(o) ? ' · Sin vehículo' : ''} · {dateTime(o.receivedAt)}</p>
                     <p className="truncate text-xs text-muted-foreground">{o.assignedTo?.fullName ?? 'Sin asignar'}</p>
                   </Link>
                   <div className="flex shrink-0 flex-col items-end gap-1">
@@ -298,7 +305,7 @@ function CollectModal({ orders, cur, onClose }: { orders: any[]; cur?: string; o
         <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg bg-muted p-3 text-sm">
           {orders.map((o) => (
             <div key={o.id} className="flex items-center justify-between gap-2">
-              <span className="truncate">{o.folio} · {hasVehicle(o) ? o.vehicle.plate : 'Venta'} · {o.client?.name ?? 'Sin cliente'}</span>
+              <span className="truncate">{o.folio} · {clientOf(o) || orderTitle(o)}{hasVehicle(o) && clientOf(o) ? ` · ${o.vehicle.plate}` : ''}</span>
               <span className="shrink-0 font-medium">
                 {state[o.id] === 'ok' ? <span className="text-emerald-600">Cobrada</span> : state[o.id] ? <span className="text-red-600" title={state[o.id]}>Error</span> : money(balanceOf(o), cur)}
               </span>

@@ -3,7 +3,7 @@ import { Suspense, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { QRCodeSVG } from 'qrcode.react';
-import { Camera, CloudOff, Mail, MessageCircle, Trash2 } from 'lucide-react';
+import { Camera, CloudOff, Mail, MessageCircle, Pencil, Trash2 } from 'lucide-react';
 import { api, compressImage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useOnline } from '@/lib/net';
@@ -11,9 +11,10 @@ import { getDb } from '@/lib/offline/db';
 import { useLive, useObjectUrl } from '@/lib/offline/hooks';
 import { mergeOrder } from '@/lib/offline/merge';
 import { addPhotoOffline, changeStatusOffline } from '@/lib/offline/sync';
-import { METHODS, NEXT, PHOTO_TYPES, STATUS, dateTime, duration, money, type Status, plateOf, vehicleName } from '@/lib/utils';
+import { METHODS, NEXT, PHOTO_TYPES, STATUS, dateTime, duration, money, type Status, plateOf, vehicleName, orderTitle, vehicleText, clientOf, hasVehicle } from '@/lib/utils';
 import { TicketActions, TicketView } from '@/components/ticket';
 import { TipField, sendTip } from '@/components/tips';
+import { ColorField, VehicleField, joinVehicle, splitVehicle } from '@/components/vehicle-field';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ErrorText, Input, Label, PageHeader, Select, StatusBadge, buttonClass } from '@/components/ui';
 
 function LocalPhoto({ id, blob, type }: { id: string; blob: Blob; type: string }) {
@@ -36,6 +37,16 @@ function OrderDetail() {
   const canCollect = can('orders:collect');
   const canAssign = can('orders:assign');
   const router = useRouter();
+  const catalogQ = useQuery({ queryKey: ['catalog', 'vehicles'], queryFn: () => api<{ brand: string; models: string[] }[]>('/catalog/vehicles'), staleTime: Infinity });
+  /** Editar el vehículo después de crear la orden (p. ej. se capturó solo el nombre). */
+  const [editVeh, setEditVeh] = useState<{ plate: string; text: string; color: string } | null>(null);
+  const saveVeh = useMutation({
+    mutationFn: () => {
+      const pv = splitVehicle(editVeh!.text, catalogQ.data ?? []);
+      return api(`/orders/${id}/vehicle`, { method: 'PATCH', body: { plate: editVeh!.plate, brand: pv.brand, model: pv.model, color: editVeh!.color || pv.color } });
+    },
+    onSuccess: () => { setEditVeh(null); refresh(); qc.invalidateQueries({ queryKey: ['clients'] }); },
+  });
   const del = useMutation({
     mutationFn: () => api(`/orders/${id}`, { method: 'DELETE' }),
     onSuccess: () => { ['orders', 'cash', 'dashboard', 'finance'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); router.replace('/orders'); },
@@ -112,7 +123,7 @@ function OrderDetail() {
 
   return (
     <>
-      <PageHeader title={`${o.folio ?? 'Folio por asignar'} · ${vehicleName(o)}`}>
+      <PageHeader title={`${o.folio ?? 'Folio por asignar'} · ${orderTitle(o)}`}>
         {o.pending && <Badge className="bg-sky-500/15 text-sky-700 dark:text-sky-300"><CloudOff className="mr-1 h-3 w-3" />Pendiente de sincronizar</Badge>}
         {o.syncProblem && <Badge className="bg-red-500/15 text-red-700 dark:text-red-300">Requiere revisión</Badge>}
         <StatusBadge status={o.status} />
@@ -143,11 +154,33 @@ function OrderDetail() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Vehículo</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>Vehículo y cliente</CardTitle>
+              {can('orders:edit') && synced && !editVeh && (
+                <Button size="sm" variant="outline" className="rounded-full" disabled={!online} onClick={() => setEditVeh({ plate: o.vehicle.plate ?? '', text: joinVehicle(o.vehicle.brand, o.vehicle.model), color: o.vehicle.color ?? '' })}>
+                  <Pencil className="h-3.5 w-3.5" />{hasVehicle(o) ? 'Editar vehículo' : 'Agregar vehículo'}
+                </Button>
+              )}
+            </CardHeader>
+            {editVeh && (
+              <CardContent className="space-y-3 border-b pb-4" data-testid="edit-vehicle">
+                <div><Label className="text-xs">Placa *</Label><Input aria-label="Placa" value={editVeh.plate} onChange={(e) => setEditVeh({ ...editVeh, plate: e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '') })} className="h-12 rounded-2xl text-center font-mono text-xl uppercase tracking-widest" /></div>
+                <div><Label className="text-xs">Vehículo <span className="font-normal text-muted-foreground">(opcional)</span></Label>
+                  <VehicleField value={editVeh.text} catalog={catalogQ.data ?? []} onChange={(text) => setEditVeh({ ...editVeh, text })} onCommit={(pv) => setEditVeh((s) => (s ? { ...s, color: s.color || pv.color } : s))} />
+                </div>
+                <div><Label className="text-xs">Color <span className="font-normal text-muted-foreground">(opcional)</span></Label><ColorField value={editVeh.color} onChange={(color) => setEditVeh({ ...editVeh, color })} /></div>
+                <ErrorText error={saveVeh.error} />
+                <div className="flex gap-2">
+                  <Button className="rounded-2xl" disabled={saveVeh.isPending || editVeh.plate.replace(/[^A-Z0-9]/g, '').length < 3} onClick={() => saveVeh.mutate()}>{saveVeh.isPending ? 'Guardando…' : 'Guardar vehículo'}</Button>
+                  <Button variant="ghost" className="rounded-2xl" onClick={() => { setEditVeh(null); saveVeh.reset(); }}>Cancelar</Button>
+                </div>
+              </CardContent>
+            )}
             <CardContent className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
               <div><p className="text-xs text-muted-foreground">Placa</p><p className="font-mono font-medium">{plateOf(o)}</p></div>
-              <div><p className="text-xs text-muted-foreground">Marca / modelo</p><p>{vehicleName(o)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Vehículo</p><p>{vehicleText(o) || '—'}</p></div>
               <div><p className="text-xs text-muted-foreground">Color</p><p>{o.vehicle.color || '—'}</p></div>
+              <div><p className="text-xs text-muted-foreground">Cliente</p><p>{clientOf(o) || '—'}</p></div>
               <div><p className="text-xs text-muted-foreground">Recibido</p><p>{dateTime(o.receivedAt)}</p></div>
               <div><p className="text-xs text-muted-foreground">Inicio</p><p>{dateTime(o.startedAt)}</p></div>
               <div><p className="text-xs text-muted-foreground">Fin</p><p>{dateTime(o.finishedAt)}</p></div>

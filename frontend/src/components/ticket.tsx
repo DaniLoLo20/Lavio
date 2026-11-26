@@ -29,7 +29,7 @@ export const TicketView = forwardRef<HTMLDivElement, { order: any; tenant: Ticke
         <p>Folio: <b>{o.folio ?? 'por asignar'}</b></p>
         <p>Fecha: {when(o.receivedAt)}</p>
         {o.vehicle?.plate ? <>
-        <p>Vehículo: {o.vehicle.brand} {o.vehicle.model}</p>
+        {(o.vehicle.brand || o.vehicle.model) && <p>Vehículo: {[o.vehicle.brand, o.vehicle.model].filter(Boolean).join(' ')}</p>}
         <p>Placa: {o.vehicle.plate}{o.vehicle.color ? ` · ${o.vehicle.color}` : ''}</p>
         </> : <p>Venta sin vehículo</p>}
         {o.client?.name && <p>Cliente: {o.client.name}</p>}
