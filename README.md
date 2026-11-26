@@ -186,6 +186,8 @@ Botón flotante **Activar Modo Voz** (en el POS y, para el administrador, en las
 
 En Nueva orden/Caja, al escribir nombre o teléfono se sugieren clientes existentes; al escribir una placa conocida se rellenan vehículo y cliente. El Modo Voz reconoce por placa, nombre exacto o teléfono, avisa «Cliente registrado» y omite las preguntas que ya conoce. Al elegir un cliente la orden se liga a él (`client.id`); sin elegirlo, el backend ya evitaba duplicados por teléfono. El índice (`GET /clients/lookup`, hasta 2000 clientes) se guarda en caché y funciona sin conexión.
 
+En el listado de **Órdenes**, si la orden trae nombre y placa se muestra primero el nombre del cliente y a su lado la placa; si solo trae placa se muestra la placa, y si solo trae nombre, el nombre.
+
 ## Flujo rápido, dictado, compras y precios
 
 - **Entrada / proceso / salida** (`/washer`): pestañas por etapa y un botón grande con el siguiente paso (Iniciar lavado, Pasar a secado, Finalizar, Entregar). «Finalizar ya» salta el secado; en Salida, «Cobrar y entregar» cobra el saldo y entrega en un toque (requiere permisos de cobrar/entregar).
@@ -225,3 +227,17 @@ En Nueva orden/Caja, al escribir nombre o teléfono se sugieren clientes existen
 - **Archivar ≠ eliminar**: archivar solo oculta la orden de la lista y del trabajo diario; sigue contando en dashboard y reportes.
 - **Filtros de Órdenes plegables**: buscador siempre visible y botón *Filtros* con el número de filtros activos.
 - **Orden del menú** (superadmin, *Configuración > Orden del menú*, `/platform/menu`): subir/bajar secciones y grupos, sacar una sección a acceso directo o moverla a otro grupo, y renombrar grupos, con vista previa del menú y de la barra de abajo en celular. Es global (todas las empresas) y no cambia permisos. Botón *Original* para volver al menú de siempre. Se guarda en la tabla `platform_settings`.
+## Servicios y productos sin vehículo
+
+- En *Servicios*, la casilla **«Pide vehículo»** (marcada por defecto). Desmárcala para productos o servicios que se venden sin placa (aromatizante, lavado de tapetes…): en la venta no se piden placa, marca, modelo, color ni foto; solo nombre y teléfono del cliente (opcionales). Se muestran con ilustración de producto y la insignia *Sin vehículo*.
+- Si en la misma orden se mezcla con un servicio que sí pide vehículo, la placa vuelve a ser obligatoria (también lo valida el servidor).
+- La orden aparece como **«Venta sin vehículo»** en Órdenes, detalle, Caja, Lavadores, ticket y reportes; el aviso al cliente dice «Su pedido está listo» y la consulta por QR muestra «Tu pedido».
+- Funciona en Nueva orden, Caja y Modo Voz (dictado y guiado omiten las preguntas del vehículo). En la base, `wash_orders.vehicle_id` ahora es opcional y `services.requires_vehicle` indica si se pide vehículo.
+## Identificar la orden por Placa o Nombre
+
+- Al crear la orden, un interruptor **Placa / Nombre** decide cómo se identifica (basta uno; se recuerda la última elección). Lo que no se usó queda plegado debajo como opcional.
+- **Vehículo en un solo campo** («Versa», «Nissan Sentra», «VW Jetta»), opcional; la marca se deduce con el catálogo. **Color opcional** (colores rápidos o «Otro color»). Una placa ya registrada sin datos no borra la marca, el modelo o el color que ya tenía.
+- **Modo Voz**: basta la placa o el nombre; si no se dice el color no se pregunta (dictado, guiado y el asistente de la foto trasera).
+- **Editar vehículo** en el detalle de la orden (permiso `orders:edit`; el administrador ya lo tiene): agregar o corregir placa, vehículo y color. `PATCH /orders/:id/vehicle`.
+- En **Órdenes** y **Lavadores** el título es la placa o, si no tiene, el nombre del cliente, y se ven ambos datos.
+- Tras crear la orden, **«Nueva orden»** aparece arriba y en grande, y la **X** cierra y deja lista la siguiente.
